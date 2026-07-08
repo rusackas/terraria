@@ -1,0 +1,165 @@
+// Terraria — the data model for the persona terrarium.
+// SQLite for zero-config local dev. Swap `provider` to "postgresql" for Vercel/Neon.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// The singleton world clock. One row, id = "world".
+model World {
+  id          String   @id @default("world")
+  currentDay  Int      @default(0) // sim-days elapsed since genesis
+  daysPerTick Int      @default(52) // ~1 sim-year per real week when ticked daily
+  tickCount   Int      @default(0)
+  seed        String   @default("terraria")
+  updatedAt   DateTime @updatedAt
+}
+
+model Persona {
+  id        String @id @default(cuid())
+  seed      String @unique // deterministic generation seed
+
+  firstName String
+  lastName  String
+  gender    String // male | female | nonbinary
+  pronouns  String
+
+  birthDay  Int // sim-day the persona was born (can be negative = born before genesis)
+  deathDay  Int? // sim-day of death, null = alive
+  alive     Boolean @default(true)
+
+  country   String
+  city      String
+  occupation String
+  education  String
+
+  // Big Five personality, 0..1, stored as columns for easy querying
+  openness          Float
+  conscientiousness Float
+  extraversion      Float
+  agreeableness     Float
+  neuroticism       Float
+
+  interests String // JSON array of strings
+  bio       String
+
+  avatarSeed String // drives the procedural face
+
+  createdAt DateTime @default(now())
+
+  // relations
+  posts        Post[]
+  reactions    Reaction[]
+  comments     Comment[]
+  memories     Memory[]
+  lifeEvents   LifeEvent[]
+  avatars      Avatar[]
+  relsA        Relationship[] @relation("relA")
+  relsB        Relationship[] @relation("relB")
+
+  @@index([alive])
+  @@index([country])
+}
+
+// Aging profile pictures. Old ones are kept (current = false).
+model Avatar {
+  id        String  @id @default(cuid())
+  persona   Persona @relation(fields: [personaId], references: [id], onDelete: Cascade)
+  personaId String
+  simDay    Int
+  ageYears  Int
+  svg       String // rendered SVG markup
+  current   Boolean @default(true)
+  createdAt DateTime @default(now())
+
+  @@index([personaId])
+}
+
+model Post {
+  id        String  @id @default(cuid())
+  author    Persona @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  authorId  String
+  simDay    Int
+  kind      String // status | opinion | milestone | life_event | news
+  topic     String?
+  text      String
+  createdAt DateTime @default(now())
+
+  reactions Reaction[]
+  comments  Comment[]
+
+  @@index([authorId])
+  @@index([simDay])
+}
+
+model Reaction {
+  id        String  @id @default(cuid())
+  post      Post    @relation(fields: [postId], references: [id], onDelete: Cascade)
+  postId    String
+  persona   Persona @relation(fields: [personaId], references: [id], onDelete: Cascade)
+  personaId String
+  type      String // like | love | laugh | wow | sad | angry
+  simDay    Int
+
+  @@unique([postId, personaId])
+  @@index([postId])
+}
+
+model Comment {
+  id        String  @id @default(cuid())
+  post      Post    @relation(fields: [postId], references: [id], onDelete: Cascade)
+  postId    String
+  author    Persona @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  authorId  String
+  text      String
+  simDay    Int
+  createdAt DateTime @default(now())
+
+  @@index([postId])
+}
+
+// A persona's growing personal knowledge base / memory stream.
+model Memory {
+  id        String  @id @default(cuid())
+  persona   Persona @relation(fields: [personaId], references: [id], onDelete: Cascade)
+  personaId String
+  simDay    Int
+  kind      String // fact | event | relationship | reflection
+  content   String
+  weight    Float   @default(1) // salience
+
+  @@index([personaId])
+}
+
+model LifeEvent {
+  id          String  @id @default(cuid())
+  persona     Persona @relation(fields: [personaId], references: [id], onDelete: Cascade)
+  personaId   String
+  simDay      Int
+  type        String // birth | job | move | relationship | child | illness | death | milestone
+  description String
+  meta        String? // JSON
+
+  @@index([personaId])
+}
+
+// Undirected relationship between two personas, stored with aId < bId.
+model Relationship {
+  id        String  @id @default(cuid())
+  a         Persona @relation("relA", fields: [aId], references: [id], onDelete: Cascade)
+  aId       String
+  b         Persona @relation("relB", fields: [bId], references: [id], onDelete: Cascade)
+  bId       String
+  type      String // acquaintance | friend | close_friend | partner | spouse | family | rival
+  strength  Float   @default(0.1)
+  sinceDay  Int
+
+  @@unique([aId, bId])
+  @@index([aId])
+  @@index([bId])
+}
