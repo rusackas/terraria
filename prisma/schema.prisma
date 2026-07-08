@@ -50,6 +50,14 @@ model Persona {
 
   avatarSeed String // drives the procedural face
 
+  // ---- Agent state: soul / memory / heartbeat (OpenClaw-style) ----
+  soul         String @default("") // evolving markdown identity
+  soulDay      Int    @default(0) // last day the soul was rewritten
+  mood         String @default("content") // current emotional state
+  focus        String @default("") // current preoccupation / what they're into now
+  energy       Float  @default(0.6) // 0..1 drive to engage
+  heartbeatDay Int    @default(0) // last heartbeat
+
   createdAt DateTime @default(now())
 
   // relations
@@ -88,6 +96,9 @@ model Post {
   kind      String // status | opinion | milestone | life_event | news
   topic     String?
   text      String
+  link      String? // source URL for shared news
+  linkTitle String? // headline / source title
+  linkSource String? // publisher
   createdAt DateTime @default(now())
 
   reactions Reaction[]
@@ -146,6 +157,21 @@ model LifeEvent {
   meta        String? // JSON
 
   @@index([personaId])
+}
+
+// Cached real-world news headlines fetched per topic (public RSS). Personas
+// share these; sharing is deduped so the same headline isn't reposted.
+model NewsItem {
+  id          String   @id @default(cuid())
+  topic       String // the interest/query it was fetched for
+  title       String
+  url         String   @unique
+  source      String?
+  fetchedDay  Int
+  sharedCount Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  @@index([topic])
 }
 
 // Undirected relationship between two personas, stored with aId < bId.

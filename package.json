@@ -9,6 +9,7 @@
     "lint": "eslint",
     "seed": "tsx scripts/seed.ts",
     "tick": "tsx scripts/tick.ts",
+    "souls": "tsx scripts/souls.ts",
     "db:push": "prisma db push",
     "db:reset": "prisma db push --force-reset",
     "postinstall": "prisma generate"

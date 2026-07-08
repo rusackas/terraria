@@ -1,8 +1,17 @@
 // Content generation for posts and comments. Templated by default (always works,
 // offline). If an AI Gateway key is configured, LLM output is used instead.
+// Posts are conditioned on the persona's heartbeat (mood + current focus); comments
+// are produced by the skill system so they respond to the actual post.
 
 import { RNG } from "./rng";
 import { TOPICS } from "./data";
+import { moodTone } from "./heartbeat";
+import {
+  extractSubject,
+  generateComment,
+  skillInstruction,
+  type CommentContext,
+} from "./skills";
 
 export interface PersonaLike {
   firstName: string;
@@ -14,6 +23,11 @@ export interface PersonaLike {
   openness: number;
   agreeableness: number;
   age: number;
+}
+
+export interface Heartbeat {
+  mood: string;
+  focus: string;
 }
 
 const llmEnabled = () => !!process.env.AI_GATEWAY_API_KEY;
@@ -39,66 +53,136 @@ async function llm(prompt: string, maxTokens = 120): Promise<string | null> {
 // ---- Post generation ----------------------------------------------------
 
 const STATUS_TEMPLATES = [
-  (r: RNG, p: PersonaLike) => `Spent the afternoon on ${r.pick(p.interests)}. Exactly what I needed.`,
+  (r: RNG, p: PersonaLike, focus: string) => `Spent the afternoon on ${focus}. Exactly what I needed.`,
   (r: RNG, p: PersonaLike) => `Some days ${p.occupation === "student" ? "studying" : `being a ${p.occupation}`} in ${p.city} is a lot. Today was one of them.`,
-  (r: RNG, p: PersonaLike) => `Thinking about picking ${r.pick(p.interests)} back up. Anyone else into it?`,
+  (r: RNG, p: PersonaLike, focus: string) => `Thinking about going deeper on ${focus} lately. Anyone else into it?`,
   (r: RNG, p: PersonaLike) => `${p.city} is doing that thing again where the whole city feels like a movie set. I love it here.`,
-  (r: RNG) => `Reminder to self: ${r.pick(["drink water", "call your mom", "go outside", "log off earlier", "start that thing you keep putting off"])}.`,
-  (r: RNG, p: PersonaLike) => `Hot take: ${r.pick(p.interests)} is criminally underrated.`,
-  (r: RNG, p: PersonaLike) => `Small win today. Won't bore you with details, but it mattered to me.`,
+  (r: RNG, p: PersonaLike, focus: string) => `${cap(focus)} kind of saved my week, honestly.`,
+  (r: RNG, p: PersonaLike, focus: string) => `Hot take: ${focus} is criminally underrated.`,
+  (r: RNG) => `Small win today. Won't bore you with details, but it mattered to me.`,
 ];
 
-const OPINION_TEMPLATES = [
-  (r: RNG, p: PersonaLike) => `I keep coming back to this: ${r.pick(p.interests)} teaches you more about patience than anything else.`,
-  (r: RNG) => `Unpopular opinion, but the old way was better. Fight me (gently).`,
-  (r: RNG, p: PersonaLike) => `Been chewing on ${r.pick(TOPICS)}. Not sure where I land yet, honestly.`,
-];
-
-const MILESTONE_TEMPLATES = [
-  (r: RNG, p: PersonaLike) => `Big news — ${r.pick(["new chapter starting", "made a decision I've been sitting on for months", "finally did the thing"])}. More soon.`,
-];
+const MOOD_OPENERS: Record<string, string[]> = {
+  joyful: ["Can't stop smiling today.", "Everything feels a little golden right now."],
+  "in love": ["My whole chest is warm lately.", "So this is what people mean."],
+  inspired: ["Head full of ideas I can't sit still.", "Feeling weirdly unstoppable."],
+  hopeful: ["Quietly optimistic these days.", "Something's shifting, I can feel it."],
+  grieving: ["Heavy one today.", "Missing someone more than usual."],
+  anxious: ["Brain won't quiet down tonight.", "Trying not to spiral, bear with me."],
+  lonely: ["Kind of a quiet stretch lately.", "Anyone else feel far from people this week?"],
+  tired: ["Running on fumes.", "This week asked a lot of me."],
+  restless: ["Itching for a change I can't name.", "Can't tell if I'm bored or just restless."],
+};
 
 export async function makePost(
   seed: string,
   persona: PersonaLike,
   kind: string,
+  hb?: Heartbeat,
 ): Promise<{ text: string; topic: string | null }> {
   const r = new RNG(seed);
-  const topic = r.pick(TOPICS);
+  const focus = hb?.focus || (persona.interests.length ? r.pick(persona.interests) : "life");
+  const mood = hb?.mood ?? "content";
+  const topic = focus || r.pick(TOPICS);
 
-  const prompt = `You are ${persona.firstName}, a ${persona.age}-year-old ${persona.occupation} in ${persona.city}. Interests: ${persona.interests.join(", ")}. Write a single short, natural social-media post (max 2 sentences, first person, no hashtags unless it fits) about ${topic}. Personality: ${describeTraits(persona)}. Just the post text.`;
+  const prompt = `You are ${persona.firstName}, a ${persona.age}-year-old ${persona.occupation} in ${persona.city}. Interests: ${persona.interests.join(", ")}. Right now you're feeling ${mood} (${moodTone(mood)}) and preoccupied with ${focus}. Write a single short, natural social-media post (max 2 sentences, first person, no hashtags) that reflects that mood and focus. Personality: ${describeTraits(persona)}. Just the post text.`;
 
   const llmText = await llm(prompt);
   if (llmText) return { text: llmText, topic };
 
+  // Milestones are genuine life wins — keep them upbeat and self-contained.
+  if (kind === "milestone") {
+    return {
+      text: r.pick([
+        `Big news — ${r.pick(["new chapter starting", "made a decision I've been sitting on for months", "finally did the thing"])}. More soon.`,
+        `Okay, I did it. Been working toward this for a long time and it finally happened.`,
+        `Some good news for once: things are genuinely looking up. Grateful.`,
+      ]),
+      topic,
+    };
+  }
+
+  // Templated: sometimes lead with a mood opener, then a focus-driven line.
+  const opener = MOOD_OPENERS[mood];
+  if (opener && r.chance(0.5)) {
+    return { text: `${r.pick(opener)} ${r.pick(STATUS_TEMPLATES)(r, persona, focus)}`, topic };
+  }
   const pool =
-    kind === "opinion" ? OPINION_TEMPLATES
-    : kind === "milestone" ? MILESTONE_TEMPLATES
-    : STATUS_TEMPLATES;
-  return { text: r.pick(pool)(r, persona), topic };
+    kind === "opinion"
+      ? [
+          (rr: RNG) => `I keep coming back to this: ${focus} teaches you more about patience than anything else.`,
+          () => `Unpopular opinion, but the old way was better. Fight me (gently).`,
+          (rr: RNG) => `Been chewing on ${rr.pick(TOPICS)}. Not sure where I land yet, honestly.`,
+        ]
+      : STATUS_TEMPLATES;
+  const t = pool[Math.floor(r.float() * pool.length)];
+  return { text: (t as (r: RNG, p: PersonaLike, f: string) => string)(r, persona, focus), topic };
 }
 
-// ---- Comment generation -------------------------------------------------
+/** A persona shares a real news headline they found on one of their interests. */
+export async function makeNewsShare(
+  seed: string,
+  persona: PersonaLike,
+  headline: string,
+  topic: string,
+): Promise<string> {
+  const r = new RNG(seed);
+  const prompt = `You are ${persona.firstName}, into ${topic}. You just read this headline: "${headline}". Write a single short social post (max 2 sentences) sharing it with your honest reaction or a question. First person. Just the text.`;
+  const llmText = await llm(prompt);
+  if (llmText) return llmText;
+  return r.pick([
+    `Been following ${topic} and this caught my eye: "${headline}". Curious what you all make of it.`,
+    `Okay, ${topic} people — thoughts on this? "${headline}"`,
+    `This is exactly the kind of ${topic} news I can't stop thinking about: "${headline}".`,
+    `Sharing because it matters to me: "${headline}". Anyone else been tracking this?`,
+  ]);
+}
 
-const COMMENT_TEMPLATES = [
-  (r: RNG) => r.pick(["So true.", "Love this.", "Needed to hear this today.", "Couldn't agree more."]),
-  (r: RNG) => r.pick(["Tell me more!", "Wait, say more about this.", "Ok now I'm curious."]),
-  (r: RNG, p: PersonaLike) => `As someone also into ${r.pick(p.interests)}, yes. A thousand times yes.`,
-  (r: RNG) => r.pick(["Sending good vibes ❤️", "Rooting for you.", "You've got this."]),
-  (r: RNG) => r.pick(["Respectfully disagree, but I see your point.", "Hmm, not sure I'm sold, but interesting."]),
-];
+// ---- Comment generation (skill-driven) ----------------------------------
 
 export async function makeComment(
   seed: string,
   commenter: PersonaLike,
-  postText: string,
+  post: { kind: string; text: string; topic: string | null; headline?: string | null; authorMood?: string },
   authorName: string,
-): Promise<string> {
+): Promise<{ text: string; skill: string }> {
   const r = new RNG(seed);
-  const prompt = `You are ${commenter.firstName}. Your friend ${authorName} posted: "${postText}". Write a single short, genuine reply (max 1 sentence). Personality: ${describeTraits(commenter)}. Just the reply.`;
-  const llmText = await llm(prompt, 60);
-  if (llmText) return llmText;
-  return r.pick(COMMENT_TEMPLATES)(r, commenter);
+  const subject = extractSubject(post);
+  const sharedInterests = deriveShared(commenter, post, subject);
+  const ctx: CommentContext = {
+    post,
+    authorName,
+    authorMood: post.authorMood,
+    commenter,
+    subject,
+    sharedInterests,
+  };
+
+  if (llmEnabled()) {
+    const instruction = skillInstruction(ctx);
+    const prompt = `You are ${commenter.firstName}. Your friend ${authorName} posted: "${post.text}". Reply in one short, natural sentence. Your job here: ${instruction}. Personality: ${describeTraits(commenter)}. Just the reply.`;
+    const llmText = await llm(prompt, 60);
+    if (llmText) return { text: llmText, skill: "llm" };
+  }
+
+  return generateComment(ctx, r);
+}
+
+/** Which of the commenter's interests are relevant to this post. */
+function deriveShared(
+  commenter: PersonaLike,
+  post: { topic: string | null; text: string },
+  subject: { interest: string | null; isNews: boolean; topic: string | null },
+): string[] {
+  const text = post.text.toLowerCase();
+  const shared = commenter.interests.filter(
+    (i) =>
+      i === subject.interest ||
+      i === subject.topic ||
+      i === post.topic ||
+      text.includes(i.toLowerCase()),
+  );
+  return [...new Set(shared)];
 }
 
 function describeTraits(p: PersonaLike): string {
@@ -108,4 +192,8 @@ function describeTraits(p: PersonaLike): string {
   if (p.agreeableness > 0.6) t.push("warm");
   if (p.openness > 0.6) t.push("curious");
   return t.join(", ");
+}
+
+function cap(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }

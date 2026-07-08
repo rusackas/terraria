@@ -2,7 +2,17 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getPerson } from "@/lib/queries";
 import { Avatar } from "@/components/Avatar";
+import { SoulView } from "@/components/SoulView";
 import { simDate } from "@/lib/time";
+
+const MOOD_EMOJI: Record<string, string> = {
+  grieving: "🕯️", anxious: "😰", lonely: "🌧️", restless: "🌀", tired: "😮‍💨",
+  content: "🙂", curious: "🤔", hopeful: "🌤️", inspired: "✨", joyful: "😄", "in love": "💞",
+};
+
+const MEMORY_ICON: Record<string, string> = {
+  fact: "📌", event: "📖", relationship: "🤝", reflection: "💭",
+};
 
 export const dynamic = "force-dynamic";
 
@@ -71,7 +81,43 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
             </div>
           </div>
         </div>
+
+        {/* Heartbeat */}
+        {p.alive && (
+          <div className="mt-4 flex items-center gap-4 flex-wrap border-t border-[var(--border)] pt-3 text-sm">
+            <span className="flex items-center gap-1.5">
+              <span aria-hidden>{MOOD_EMOJI[p.mood] ?? "🙂"}</span>
+              <span className="text-[var(--muted)]">feeling</span>
+              <span className="font-medium">{p.mood}</span>
+            </span>
+            {p.focus && (
+              <span className="flex items-center gap-1.5">
+                <span className="text-[var(--muted)]">focused on</span>
+                <span className="font-medium">{p.focus}</span>
+              </span>
+            )}
+            <span className="flex items-center gap-2">
+              <span className="text-[var(--muted)]">energy</span>
+              <span className="h-1.5 w-20 rounded-full bg-[var(--surface-2)] overflow-hidden">
+                <span
+                  className="block h-full rounded-full bg-[var(--amber)]"
+                  style={{ width: `${Math.round(p.energy * 100)}%` }}
+                />
+              </span>
+            </span>
+          </div>
+        )}
       </section>
+
+      {/* Soul */}
+      {p.soul && (
+        <section className="card p-5">
+          <h2 className="text-sm font-semibold text-[var(--muted)] uppercase tracking-wide mb-3">
+            Soul <span className="normal-case font-normal">· soul.md</span>
+          </h2>
+          <SoulView markdown={p.soul} />
+        </section>
+      )}
 
       {/* Aging portrait gallery */}
       {p.avatars.length > 1 && (
@@ -161,6 +207,24 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
               </li>
             ))}
           </ol>
+        </section>
+      )}
+
+      {/* Memory */}
+      {p.memories.length > 0 && (
+        <section className="card p-5">
+          <h2 className="text-sm font-semibold text-[var(--muted)] uppercase tracking-wide">
+            Memory <span className="normal-case font-normal">· what they carry with them</span>
+          </h2>
+          <ul className="mt-3 space-y-2">
+            {p.memories.map((m) => (
+              <li key={m.id} className="flex items-baseline gap-2 text-sm">
+                <span aria-hidden>{MEMORY_ICON[m.kind] ?? "•"}</span>
+                <span className={`flex-1 ${m.kind === "reflection" ? "italic" : ""}`}>{m.content}</span>
+                <span className="text-xs text-[var(--muted)] tabular-nums">{simDate(m.simDay)}</span>
+              </li>
+            ))}
+          </ul>
         </section>
       )}
 

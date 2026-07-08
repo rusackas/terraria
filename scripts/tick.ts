@@ -10,8 +10,8 @@ async function main() {
     const r = await tick();
     console.log(
       `⏱  tick ${r.tick} — ${r.date} | pop ${r.population} | ` +
-        `posts ${r.posts} comments ${r.comments} reactions ${r.reactions} | ` +
-        `+rels ${r.newRelationships} births ${r.births} deaths ${r.deaths}`,
+        `posts ${r.posts} (news ${r.newsShared}) comments ${r.comments} reactions ${r.reactions} | ` +
+        `reflections ${r.reflections} +rels ${r.newRelationships} births ${r.births} deaths ${r.deaths}`,
     );
     for (const e of r.events) console.log(`     ${e}`);
   }

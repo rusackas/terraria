@@ -5,11 +5,16 @@ import { prisma } from "./db";
 import { RNG } from "./rng";
 import { ageOf, DAYS_PER_YEAR, simDate } from "./time";
 import { generatePersona, faceFor } from "./generate";
-import { makePost, makeComment, type PersonaLike } from "./content";
+import { makePost, makeComment, makeNewsShare, type PersonaLike } from "./content";
 import { REACTION_TYPES } from "./data";
+import { buildSoul, type SoulInput } from "./soul";
+import { beat, type HeartbeatState, type HeartbeatSignals } from "./heartbeat";
+import { remember, distillInsight, type ReflectionSignals } from "./memory";
+import { getNewsForTopic, markShared } from "./news";
 import type { Persona } from "@prisma/client";
 
 const AVATAR_REFRESH_YEARS = 5;
+const NEWS_POSTS_PER_TICK = 12; // cap network + share volume per tick
 
 export interface TickReport {
   tick: number;
@@ -19,6 +24,8 @@ export interface TickReport {
   posts: number;
   comments: number;
   reactions: number;
+  newsShared: number;
+  reflections: number;
   newRelationships: number;
   births: number;
   deaths: number;
@@ -65,9 +72,79 @@ export async function tick(): Promise<TickReport> {
 
   const events: string[] = [];
   let posts = 0, comments = 0, reactions = 0, newRelationships = 0, births = 0, deaths = 0;
+  let newsShared = 0, reflections = 0;
 
   const alive = await prisma.persona.findMany({ where: { alive: true } });
   const byId = new Map(alive.map((p) => [p.id, p]));
+
+  // 0) HEARTBEAT: gather what happened to each persona since last tick, then
+  //    advance their inner state (mood / focus / energy). This drives posting.
+  const prevPosts = await prisma.post.findMany({
+    where: { simDay: { gte: day - world.daysPerTick } },
+    select: { id: true, authorId: true },
+  });
+  const postAuthor = new Map(prevPosts.map((p) => [p.id, p.authorId]));
+  const postedPrev = new Set(prevPosts.map((p) => p.authorId));
+  const rxByAuthor = new Map<string, number>();
+  const cmByAuthor = new Map<string, number>();
+  if (prevPosts.length) {
+    const ids = prevPosts.map((p) => p.id);
+    const rx = await prisma.reaction.groupBy({ by: ["postId"], where: { postId: { in: ids } }, _count: true });
+    for (const r of rx) {
+      const a = postAuthor.get(r.postId);
+      if (a) rxByAuthor.set(a, (rxByAuthor.get(a) ?? 0) + r._count);
+    }
+    const cm = await prisma.comment.groupBy({ by: ["postId"], where: { postId: { in: ids } }, _count: true });
+    for (const c of cm) {
+      const a = postAuthor.get(c.postId);
+      if (a) cmByAuthor.set(a, (cmByAuthor.get(a) ?? 0) + c._count);
+    }
+  }
+  // life events since last tick, per persona
+  const recentEvents = await prisma.lifeEvent.findMany({
+    where: { simDay: { gte: day - world.daysPerTick } },
+    select: { personaId: true, type: true },
+  });
+  const evByPersona = new Map<string, Set<string>>();
+  for (const e of recentEvents) {
+    let s = evByPersona.get(e.personaId);
+    if (!s) evByPersona.set(e.personaId, (s = new Set()));
+    s.add(e.type);
+  }
+
+  for (const p of alive) {
+    // Backfill a soul for anyone created before agents existed.
+    if (!p.soul) {
+      const soul = buildSoul(soulInputFor(p, day, []));
+      await prisma.persona.update({ where: { id: p.id }, data: { soul, soulDay: day } });
+      p.soul = soul;
+      p.soulDay = day;
+    }
+
+    const ev = evByPersona.get(p.id) ?? new Set<string>();
+    const signals: HeartbeatSignals = {
+      reactionsReceived: rxByAuthor.get(p.id) ?? 0,
+      commentsReceived: cmByAuthor.get(p.id) ?? 0,
+      hadPositiveEvent: ev.has("job") || ev.has("child") || ev.has("milestone"),
+      hadLoss: ev.has("loss"),
+      becamePartner: ev.has("relationship"),
+      neuroticism: p.neuroticism,
+      extraversion: p.extraversion,
+      openness: p.openness,
+      interests: interestsOf(p),
+    };
+    const hbRng = new RNG(`${world.seed}:hb:${p.id}:${tickNo}`);
+    const prev: HeartbeatState = { mood: p.mood, focus: p.focus, energy: p.energy };
+    const next = beat(hbRng, prev, signals);
+    await prisma.persona.update({
+      where: { id: p.id },
+      data: { mood: next.mood, focus: next.focus, energy: next.energy, heartbeatDay: day },
+    });
+    // mutate in-memory so this tick's posting sees the fresh state
+    p.mood = next.mood;
+    p.focus = next.focus;
+    p.energy = next.energy;
+  }
 
   // 1) AGING: refresh avatars whose portrait is ~AVATAR_REFRESH_YEARS stale.
   for (const p of alive) {
@@ -93,13 +170,29 @@ export async function tick(): Promise<TickReport> {
     }
   }
 
-  // 2) POSTING: chance scales with extraversion.
-  const newPosts: { id: string; authorId: string; text: string; topic: string | null }[] = [];
+  // 2) POSTING: driven by heartbeat (mood, focus, energy). Some posts are shares
+  //    of real news the persona "found" on a topic they care about.
   for (const p of alive) {
     const age = ageOf(p.birthDay, day);
     if (age < 8) continue; // little ones don't post
-    const pPost = 0.15 + p.extraversion * 0.45;
+    const like = toPersonaLike(p, day);
+    const pPost = 0.12 + p.extraversion * 0.4 + p.energy * 0.15;
     if (!rng.chance(pPost)) continue;
+
+    // News share?
+    const topicChoice = p.focus || (like.interests.length ? rng.pick(like.interests) : "");
+    const wantsNews =
+      topicChoice &&
+      newsShared < NEWS_POSTS_PER_TICK &&
+      rng.chance(0.22 + p.openness * 0.25);
+    if (wantsNews) {
+      const shared = await tryNewsShare(world.seed, tickNo, p, like, topicChoice, day);
+      if (shared) {
+        newsShared++;
+        posts++;
+        continue;
+      }
+    }
 
     const kind = rng.weighted([
       ["status", 60],
@@ -108,13 +201,17 @@ export async function tick(): Promise<TickReport> {
     ] as const);
     const { text, topic } = await makePost(
       `${world.seed}:post:${p.id}:${tickNo}`,
-      toPersonaLike(p, day),
+      like,
       kind,
+      { mood: p.mood, focus: p.focus },
     );
-    const post = await prisma.post.create({
+    await prisma.post.create({
       data: { authorId: p.id, simDay: day, kind, topic, text },
     });
-    newPosts.push({ id: post.id, authorId: p.id, text, topic });
+    // grow their memory from what they chose to share
+    if (kind === "milestone" || rng.chance(0.3)) {
+      await remember(p.id, day, "post", `I posted about ${topic ?? "life"}: "${trim(text)}"`, 0.6);
+    }
     posts++;
   }
 
@@ -197,12 +294,12 @@ export async function tick(): Promise<TickReport> {
         bump(relTouch, viewer.id, post.authorId, 0.05 + shared * 0.015);
       }
 
-      // comment (rarer)
+      // comment (rarer) — skill-driven, responds to the actual post
       if (rng.chance(Math.min(0.22, 0.015 + affinity * 0.4))) {
-        const text = await makeComment(
+        const { text } = await makeComment(
           `${world.seed}:cmt:${post.id}:${viewer.id}`,
           toPersonaLike(viewer, day),
-          post.text,
+          { kind: post.kind, text: post.text, topic: post.topic, headline: post.linkTitle, authorMood: author.mood },
           author.firstName,
         );
         await prisma.comment.create({
@@ -210,6 +307,16 @@ export async function tick(): Promise<TickReport> {
         });
         comments++;
         bump(relTouch, viewer.id, post.authorId, 0.1 + shared * 0.02);
+        // remember a real conversation over a shared interest
+        if (shared > 0 && rng.chance(0.3)) {
+          const common = interestsOf(viewer).filter((i) => authorInterests.has(i));
+          if (common.length) {
+            await remember(
+              viewer.id, day, "relationship",
+              `Talked with ${author.firstName} about ${rng.pick(common)}.`, 0.9,
+            );
+          }
+        }
       }
     }
   }
@@ -314,7 +421,47 @@ export async function tick(): Promise<TickReport> {
     }
   }
 
-  // 7) commit the clock.
+  // 7) REFLECTION: some personas pause and distill recent experience into an
+  //    insight, which is written into their soul. This is how they grow.
+  const stillAlive = await prisma.persona.findMany({
+    where: { id: { in: alive.map((p) => p.id) }, alive: true },
+    select: { id: true },
+  });
+  const aliveIds = new Set(stillAlive.map((p) => p.id));
+  for (const p of alive) {
+    if (!aliveIds.has(p.id)) continue; // died this tick
+    const reflectRng = new RNG(`${world.seed}:refl:${p.id}:${tickNo}`);
+    if (!reflectRng.chance(0.12 + p.openness * 0.12)) continue;
+
+    const ev = evByPersona.get(p.id) ?? new Set<string>();
+    const engagement = (rxByAuthor.get(p.id) ?? 0) + (cmByAuthor.get(p.id) ?? 0);
+    const sig: ReflectionSignals = {
+      recentLoss: ev.has("loss"),
+      recentLove: ev.has("relationship"),
+      recentPositiveEvent: ev.has("job") || ev.has("child") || ev.has("milestone"),
+      wellReceived: engagement >= 5,
+      ignored: engagement === 0 && postedPrev.has(p.id),
+      topInterest: p.focus || interestsOf(p)[0] || null,
+      mood: p.mood,
+      agreeableness: p.agreeableness,
+      openness: p.openness,
+    };
+    const insight = distillInsight(sig, reflectRng);
+    await remember(p.id, day, "reflection", insight, 1.6);
+
+    const insights = (
+      await prisma.memory.findMany({
+        where: { personaId: p.id, kind: "reflection" },
+        orderBy: [{ simDay: "desc" }],
+        take: 6,
+      })
+    ).map((m) => m.content);
+    const soul = buildSoul(soulInputFor(p, day, insights));
+    await prisma.persona.update({ where: { id: p.id }, data: { soul, soulDay: day } });
+    reflections++;
+  }
+
+  // 8) commit the clock.
   await prisma.world.update({
     where: { id: "world" },
     data: { currentDay: day, tickCount: tickNo },
@@ -330,6 +477,8 @@ export async function tick(): Promise<TickReport> {
     posts,
     comments,
     reactions,
+    newsShared,
+    reflections,
     newRelationships,
     births,
     deaths,
@@ -343,6 +492,67 @@ function bump(map: Map<string, number>, a: string, b: string, w: number) {
   const [x, y] = pairKey(a, b);
   const key = `${x}|${y}`;
   map.set(key, (map.get(key) ?? 0) + w);
+}
+
+function trim(s: string, n = 90): string {
+  return s.length > n ? s.slice(0, n - 1) + "…" : s;
+}
+
+function soulInputFor(p: Persona, day: number, insights: string[]): SoulInput {
+  return {
+    firstName: p.firstName,
+    lastName: p.lastName,
+    pronouns: p.pronouns,
+    age: ageOf(p.birthDay, day),
+    occupation: p.occupation,
+    city: p.city,
+    country: p.country,
+    interests: interestsOf(p),
+    traits: {
+      openness: p.openness,
+      conscientiousness: p.conscientiousness,
+      extraversion: p.extraversion,
+      agreeableness: p.agreeableness,
+      neuroticism: p.neuroticism,
+    },
+    bio: p.bio,
+    insights,
+    day,
+  };
+}
+
+/**
+ * Try to share a real news headline on `topic`. Returns true if a post was made.
+ * Falls back (returns false) when there's no news available (e.g. offline).
+ */
+async function tryNewsShare(
+  seed: string,
+  tickNo: number,
+  p: Persona,
+  like: PersonaLike,
+  topic: string,
+  day: number,
+): Promise<boolean> {
+  const items = await getNewsForTopic(topic, day, 6);
+  if (!items.length) return false;
+  const shareRng = new RNG(`${seed}:news:${p.id}:${tickNo}`);
+  const item = shareRng.pick(items);
+  const text = await makeNewsShare(`${seed}:newsshare:${p.id}:${tickNo}`, like, item.title, topic);
+  await prisma.post.create({
+    data: {
+      authorId: p.id,
+      simDay: day,
+      kind: "news",
+      topic,
+      text,
+      link: item.url,
+      linkTitle: item.title,
+      linkSource: item.source,
+    },
+  });
+  await markShared(item.id);
+  await remember(p.id, day, "fact", `Read and shared news about ${topic}: "${trim(item.title)}"`, 0.9);
+  return true;
 }
 
 async function partneredSet(): Promise<Set<string>> {
@@ -380,6 +590,17 @@ async function killPersona(p: Persona, day: number) {
   await prisma.lifeEvent.create({
     data: { personaId: p.id, simDay: day, type: "death", description: `${p.firstName} passed away.` },
   });
+  // Survivors who were close grieve — a loss event + memory feeds their heartbeat.
+  const rels = await prisma.relationship.findMany({
+    where: { OR: [{ aId: p.id }, { bId: p.id }], strength: { gte: 0.4 } },
+  });
+  for (const r of rels) {
+    const survivor = r.aId === p.id ? r.bId : r.aId;
+    await prisma.lifeEvent.create({
+      data: { personaId: survivor, simDay: day, type: "loss", description: `Lost ${p.firstName} ${p.lastName}.` },
+    });
+    await remember(survivor, day, "event", `Lost ${p.firstName}, someone who mattered to me.`, 2.2);
+  }
 }
 
 async function linkFamily(childId: string, parentId: string, day: number) {
@@ -393,6 +614,25 @@ async function linkFamily(childId: string, parentId: string, day: number) {
 
 export async function createPersona(gen: ReturnType<typeof generatePersona>, day: number) {
   const age = ageOf(gen.birthDay, day);
+  const soul = buildSoul({
+    firstName: gen.firstName,
+    lastName: gen.lastName,
+    pronouns: gen.pronouns,
+    age,
+    occupation: gen.occupation,
+    city: gen.city,
+    country: gen.country,
+    interests: gen.interests,
+    traits: {
+      openness: gen.openness,
+      conscientiousness: gen.conscientiousness,
+      extraversion: gen.extraversion,
+      agreeableness: gen.agreeableness,
+      neuroticism: gen.neuroticism,
+    },
+    bio: gen.bio,
+    day,
+  });
   const persona = await prisma.persona.create({
     data: {
       seed: gen.seed,
@@ -413,6 +653,21 @@ export async function createPersona(gen: ReturnType<typeof generatePersona>, day
       interests: JSON.stringify(gen.interests),
       bio: gen.bio,
       avatarSeed: gen.avatarSeed,
+      soul,
+      soulDay: day,
+      mood: age < 2 ? "content" : "curious",
+      focus: gen.interests[0] ?? "",
+      energy: 0.6,
+      heartbeatDay: day,
+    },
+  });
+  await prisma.memory.create({
+    data: {
+      personaId: persona.id,
+      simDay: gen.birthDay,
+      kind: "fact",
+      content: `I'm ${gen.firstName}, ${gen.occupation === "toddler" ? "just starting out" : `a ${gen.occupation}`} in ${gen.city}.`,
+      weight: 1,
     },
   });
   await prisma.avatar.create({

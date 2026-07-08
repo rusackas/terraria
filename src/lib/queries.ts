@@ -14,6 +14,9 @@ export interface FeedPost {
   simDay: number;
   kind: string;
   text: string;
+  link: string | null;
+  linkTitle: string | null;
+  linkSource: string | null;
   author: { id: string; firstName: string; lastName: string; avatarSvg: string | null };
   reactions: { type: string; count: number }[];
   reactionTotal: number;
@@ -48,6 +51,9 @@ export async function getFeed(limit = 40): Promise<FeedPost[]> {
       simDay: p.simDay,
       kind: p.kind,
       text: p.text,
+      link: p.link,
+      linkTitle: p.linkTitle,
+      linkSource: p.linkSource,
       author: {
         id: p.author.id,
         firstName: p.author.firstName,
@@ -170,6 +176,10 @@ export async function getPerson(id: string) {
     age: ageOf(p.birthDay, endDay),
     birthDay: p.birthDay,
     deathDay: p.deathDay,
+    soul: p.soul,
+    mood: p.mood,
+    focus: p.focus,
+    energy: p.energy,
     interests: safeJson(p.interests),
     traits: {
       openness: p.openness,
@@ -184,6 +194,9 @@ export async function getPerson(id: string) {
       text: post.text,
       kind: post.kind,
       simDay: post.simDay,
+      link: post.link,
+      linkTitle: post.linkTitle,
+      linkSource: post.linkSource,
       reactionTotal: post.reactions.length,
       commentTotal: post.comments.length,
     })),

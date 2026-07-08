@@ -43,6 +43,23 @@ export function PostCard({ post }: { post: FeedPost }) {
 
           <p className="mt-1.5 text-[0.95rem] leading-relaxed">{post.text}</p>
 
+          {post.link && (
+            <a
+              href={post.link}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-2 flex items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-2.5 hover:border-[var(--accent)] transition-colors"
+            >
+              <span aria-hidden className="text-base">🔗</span>
+              <span className="min-w-0">
+                <span className="block text-sm font-medium truncate">{post.linkTitle}</span>
+                {post.linkSource && (
+                  <span className="block text-xs text-[var(--muted)] truncate">{post.linkSource}</span>
+                )}
+              </span>
+            </a>
+          )}
+
           <div className="mt-3 flex items-center gap-3 text-xs text-[var(--muted)]">
             {post.reactionTotal > 0 && (
               <span className="flex items-center gap-1">
