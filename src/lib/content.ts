@@ -6,6 +6,7 @@
 import { RNG } from "./rng";
 import { TOPICS } from "./data";
 import { moodTone } from "./heartbeat";
+import { generate, llmAvailable } from "./llm";
 import {
   extractSubject,
   generateComment,
@@ -30,25 +31,8 @@ export interface Heartbeat {
   focus: string;
 }
 
-const llmEnabled = () => !!process.env.AI_GATEWAY_API_KEY;
-const MODEL = process.env.TERRARIA_MODEL || "openai/gpt-4o-mini";
-
-async function llm(prompt: string, maxTokens = 120): Promise<string | null> {
-  if (!llmEnabled()) return null;
-  try {
-    const { generateText } = await import("ai");
-    const { text } = await generateText({
-      model: MODEL,
-      prompt,
-      maxOutputTokens: maxTokens,
-      temperature: 0.9,
-    });
-    return text.trim().replace(/^["']|["']$/g, "");
-  } catch (err) {
-    console.warn("[terraria] LLM call failed, falling back to template:", (err as Error).message);
-    return null;
-  }
-}
+const llmEnabled = llmAvailable;
+const llm = generate;
 
 // ---- Post generation ----------------------------------------------------
 

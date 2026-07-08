@@ -36,7 +36,7 @@ npm run dev            # open http://localhost:3000 and watch it unfold
 | **Comment skills** — composable behaviors (celebrate, empathize, relate-on-topic, discuss-news, ask, agree/disagree, banter) that respond to the actual post | `src/lib/skills.ts` |
 | **Real news** — personas fetch headlines on their interests via public RSS and share them | `src/lib/news.ts` |
 | **The clock** — one `tick()` beats every heart, ages everyone, generates activity, grows the graph, rolls life events, births & deaths, and reflects | `src/lib/sim.ts` |
-| **Content** — templated by default, LLM-enhanced when `AI_GATEWAY_API_KEY` is set | `src/lib/content.ts` |
+| **Content** — templated by default, LLM-enhanced via the Anthropic SDK or `claude -p` when configured | `src/lib/content.ts`, `src/lib/llm.ts` |
 | **The window** — feed, resident directory, and rich profiles (soul, heartbeat, memory) | `src/app/**` |
 
 Everything is derived from a **seed**, so a given world is fully reproducible.
@@ -72,14 +72,27 @@ the intended cadence). Tune it on the `World` row.
 
 ## Enabling the LLM (optional)
 
-Set in `.env`:
+No AI Gateway key needed. Content is templated by default; add one of the following
+to have the personas write their own posts/comments (via the official
+`@anthropic-ai/sdk`). Everything stays fully functional without it.
+
+**Option A — Anthropic API** (works locally *and* on Vercel; best for the sim's volume):
 
 ```bash
-AI_GATEWAY_API_KEY=...        # Vercel AI Gateway key
-TERRARIA_MODEL=openai/gpt-4o-mini
+ANTHROPIC_API_KEY=...            # your existing Anthropic key
+# TERRARIA_MODEL=claude-haiku-4-5  # optional; default is claude-opus-4-8
 ```
 
-Without it, Terraria falls back to templated content and is fully functional.
+**Option B — Claude Code CLI** (local only; uses your existing `claude` login, no key):
+
+```bash
+TERRARIA_LLM=claude-cli
+```
+
+`claude -p` spawns a process per call, so it's handy for local `npm run tick` but is
+slow at volume and unavailable in serverless — the Anthropic API path is the default
+whenever a key is present. A tick generates dozens of posts and ~100 comments, so
+`claude-haiku-4-5` is the recommended model for cost and speed.
 
 ## Deploying to Vercel
 

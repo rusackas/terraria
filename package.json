@@ -15,9 +15,8 @@
     "postinstall": "prisma generate"
   },
   "dependencies": {
-    "@ai-sdk/openai": "^3.0.82",
+    "@anthropic-ai/sdk": "^0.110.0",
     "@prisma/client": "^6.19.3",
-    "ai": "^6.0.221",
     "next": "16.2.10",
     "prisma": "^6.19.3",
     "react": "19.2.4",
