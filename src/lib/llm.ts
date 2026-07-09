@@ -14,26 +14,39 @@
 
 type Backend = "anthropic" | "cli" | "off";
 
-// Per skill guidance the default is Opus 4.8. For a terrarium generating
-// hundreds of short posts/comments per tick, `claude-haiku-4-5` is far cheaper
-// and faster — set TERRARIA_MODEL to switch.
-const MODEL = process.env.TERRARIA_MODEL || "claude-opus-4-8";
-
-function hasAnthropicKey(): boolean {
-  return !!(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
-}
+// Haiku 4.5 — fast and cheap, the right fit for a terrarium generating hundreds
+// of short posts/comments per tick. Override with TERRARIA_MODEL for a beefier
+// model (e.g. claude-opus-4-8) if you want richer writing.
+const MODEL = process.env.TERRARIA_MODEL || "claude-haiku-4-5";
 
 export function backend(): Backend {
   const mode = process.env.TERRARIA_LLM?.toLowerCase();
   if (mode === "off") return "off";
   if (mode === "anthropic") return "anthropic";
   if (mode === "cli" || mode === "claude-cli") return "cli";
-  // auto: prefer the SDK when a key exists, otherwise stay templated.
-  return hasAnthropicKey() ? "anthropic" : "off";
+  // Default: `claude -p` — real AI content on your Claude subscription, no API
+  // tokens. We never silently use the paid API just because a key is present;
+  // set TERRARIA_LLM=anthropic to opt into that. Templates are error-only fallback.
+  return "cli";
 }
 
 export function llmAvailable(): boolean {
   return backend() !== "off";
+}
+
+// Optional cap on LLM calls per tick. A tick can generate ~130 posts+comments;
+// capping keeps the `claude -p` path fast and bounds subscription/rate-limit use.
+// 0 = unlimited. Beyond the cap, callers fall back to templated content.
+const BUDGET = parseInt(process.env.TERRARIA_LLM_BUDGET || "0", 10);
+let used = 0;
+
+/** Reset the per-tick LLM budget. Call at the start of each tick. */
+export function resetLlmBudget(): void {
+  used = 0;
+}
+
+function overBudget(): boolean {
+  return BUDGET > 0 && used >= BUDGET;
 }
 
 // Lazy Anthropic client singleton (reads ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN).
@@ -67,32 +80,37 @@ async function viaAnthropic(prompt: string, maxTokens: number): Promise<string |
   }
 }
 
+let cliMissing = false; // set once if the `claude` binary isn't found
+
 async function viaCli(prompt: string): Promise<string | null> {
+  if (cliMissing) return null;
   try {
     const { execFile } = await import("node:child_process");
     const { promisify } = await import("node:util");
     const run = promisify(execFile);
-    const args = ["-p", prompt];
-    if (process.env.TERRARIA_MODEL) args.push("--model", process.env.TERRARIA_MODEL);
-    const { stdout } = await run("claude", args, {
+    const { stdout } = await run("claude", ["-p", prompt, "--model", MODEL], {
       timeout: 60_000,
       maxBuffer: 1024 * 1024,
     });
     return stripQuotes(stdout) || null;
   } catch (err) {
-    console.warn("[terraria] `claude -p` failed, falling back to template:", (err as Error).message);
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      cliMissing = true;
+      console.warn(
+        "[terraria] `claude` CLI not found. Install Claude Code, or set TERRARIA_LLM=anthropic. Using templates for now.",
+      );
+    } else {
+      console.warn("[terraria] `claude -p` failed, using template:", (err as Error).message);
+    }
     return null;
   }
 }
 
-/** Generate text. Returns null when no backend is available or the call fails. */
+/** Generate text. Returns null when no backend is available, the per-tick budget
+ *  is exhausted, or the call fails (callers then use templated content). */
 export async function generate(prompt: string, maxTokens = 120): Promise<string | null> {
-  switch (backend()) {
-    case "anthropic":
-      return viaAnthropic(prompt, maxTokens);
-    case "cli":
-      return viaCli(prompt);
-    default:
-      return null;
-  }
+  const b = backend();
+  if (b === "off" || overBudget()) return null;
+  used++;
+  return b === "cli" ? viaCli(prompt) : viaAnthropic(prompt, maxTokens);
 }

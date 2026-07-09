@@ -11,6 +11,7 @@ import { buildSoul, type SoulInput } from "./soul";
 import { beat, type HeartbeatState, type HeartbeatSignals } from "./heartbeat";
 import { remember, distillInsight, type ReflectionSignals } from "./memory";
 import { getNewsForTopic, markShared } from "./news";
+import { resetLlmBudget } from "./llm";
 import type { Persona } from "@prisma/client";
 
 const AVATAR_REFRESH_YEARS = 5;
@@ -69,6 +70,8 @@ export async function tick(): Promise<TickReport> {
   const day = world.currentDay + world.daysPerTick;
   const tickNo = world.tickCount + 1;
   const rng = new RNG(`${world.seed}::tick::${tickNo}`);
+
+  resetLlmBudget(); // fresh per-tick LLM call budget (see TERRARIA_LLM_BUDGET)
 
   const events: string[] = [];
   let posts = 0, comments = 0, reactions = 0, newRelationships = 0, births = 0, deaths = 0;
