@@ -94,12 +94,17 @@ Backends (`TERRARIA_LLM`):
 | `anthropic` | Official `@anthropic-ai/sdk` (needs `ANTHROPIC_API_KEY`) | paid |
 | `off` | templates only | none |
 
+**Speed:** `claude -p` boots a full CLI per call (~10s), so the sim generates posts and
+comments **in parallel**, bounded by `TERRARIA_LLM_CONCURRENCY` (default 4). A ~130-call
+tick runs in ~6–7 min at 4, ~3.5 min at 8 — raise it if your machine and subscription
+limits allow. RNG draws and DB writes stay strictly ordered; only the LLM calls fan out.
+
 **On cost / batching:** the Anthropic **Batch API** (50% off) and **prompt caching**
 only apply to the paid `anthropic` backend — they make API tokens cheaper, not free,
 and batches can take up to an hour, which doesn't fit a sim that ticks every few
-minutes. The zero-token path is `claude -p`, where the only lever is call volume:
-`TERRARIA_LLM_BUDGET` caps LLM calls per tick if you bump subscription rate limits
-(leave it at `0`/unlimited for maximum AI interaction).
+minutes. The zero-token path is `claude -p`; `TERRARIA_LLM_BUDGET` caps LLM calls per
+tick if you bump subscription rate limits (leave it at `0`/unlimited for maximum AI
+interaction).
 
 **Bringing in other models:** `src/lib/llm.ts` is the single seam. Adding another
 provider (OpenAI, Gemini, a local model) is a new `case` in `backend()`/`generate()`;

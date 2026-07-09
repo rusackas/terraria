@@ -49,6 +49,27 @@ function overBudget(): boolean {
   return BUDGET > 0 && used >= BUDGET;
 }
 
+// Bounded concurrency. `claude -p` spawns a full CLI per call (~seconds of
+// startup), so the sim fires calls in parallel — this caps how many run at once
+// to keep memory/rate-limit use sane. Default 4; raise for more throughput if
+// your machine (and subscription limits) can take it.
+const CONCURRENCY = Math.max(1, parseInt(process.env.TERRARIA_LLM_CONCURRENCY || "4", 10));
+let active = 0;
+const waiters: (() => void)[] = [];
+
+async function withSlot<T>(fn: () => Promise<T>): Promise<T> {
+  while (active >= CONCURRENCY) {
+    await new Promise<void>((res) => waiters.push(res));
+  }
+  active++;
+  try {
+    return await fn();
+  } finally {
+    active--;
+    waiters.shift()?.();
+  }
+}
+
 // Lazy Anthropic client singleton (reads ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN).
 let clientPromise: Promise<import("@anthropic-ai/sdk").default> | null = null;
 async function anthropic() {
@@ -112,5 +133,5 @@ export async function generate(prompt: string, maxTokens = 120): Promise<string 
   const b = backend();
   if (b === "off" || overBudget()) return null;
   used++;
-  return b === "cli" ? viaCli(prompt) : viaAnthropic(prompt, maxTokens);
+  return withSlot(() => (b === "cli" ? viaCli(prompt) : viaAnthropic(prompt, maxTokens)));
 }

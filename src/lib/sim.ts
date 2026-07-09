@@ -174,7 +174,21 @@ export async function tick(): Promise<TickReport> {
   }
 
   // 2) POSTING: driven by heartbeat (mood, focus, energy). Some posts are shares
-  //    of real news the persona "found" on a topic they care about.
+  //    of real news the persona "found" on a topic they care about. Done in three
+  //    phases so the (slow) LLM calls run in parallel while RNG + DB stay ordered:
+  //    (1) sequential: draw all decisions + fetch/pick news;
+  //    (2) parallel:   generate post text via the LLM (bounded concurrency);
+  //    (3) sequential: persist posts + memories (SQLite is single-writer).
+  interface PostTask {
+    p: Persona;
+    like: PersonaLike;
+    kind: string;
+    mood: string;
+    focus: string;
+    rememberIt: boolean;
+    news: { topic: string; id: string; title: string; url: string; source: string | null } | null;
+  }
+  const postTasks: PostTask[] = [];
   for (const p of alive) {
     const age = ageOf(p.birthDay, day);
     if (age < 8) continue; // little ones don't post
@@ -188,32 +202,60 @@ export async function tick(): Promise<TickReport> {
       topicChoice &&
       newsShared < NEWS_POSTS_PER_TICK &&
       rng.chance(0.22 + p.openness * 0.25);
+    let news: PostTask["news"] = null;
     if (wantsNews) {
-      const shared = await tryNewsShare(world.seed, tickNo, p, like, topicChoice, day);
-      if (shared) {
+      const items = await getNewsForTopic(topicChoice, day, 6);
+      if (items.length) {
+        const item = new RNG(`${world.seed}:news:${p.id}:${tickNo}`).pick(items);
+        news = { topic: topicChoice, id: item.id, title: item.title, url: item.url, source: item.source };
         newsShared++;
-        posts++;
-        continue;
       }
     }
 
-    const kind = rng.weighted([
-      ["status", 60],
-      ["opinion", 25],
-      ["milestone", 15],
-    ] as const);
-    const { text, topic } = await makePost(
-      `${world.seed}:post:${p.id}:${tickNo}`,
-      like,
-      kind,
-      { mood: p.mood, focus: p.focus },
-    );
-    await prisma.post.create({
-      data: { authorId: p.id, simDay: day, kind, topic, text },
-    });
-    // grow their memory from what they chose to share
-    if (kind === "milestone" || rng.chance(0.3)) {
-      await remember(p.id, day, "post", `I posted about ${topic ?? "life"}: "${trim(text)}"`, 0.6);
+    const kind = news
+      ? "news"
+      : rng.weighted([
+          ["status", 60],
+          ["opinion", 25],
+          ["milestone", 15],
+        ] as const);
+    const rememberIt = kind === "milestone" || rng.chance(0.3);
+    postTasks.push({ p, like, kind, mood: p.mood, focus: p.focus, rememberIt, news });
+  }
+
+  const generatedPosts = await Promise.all(
+    postTasks.map(async (t) => {
+      if (t.news) {
+        const text = await makeNewsShare(
+          `${world.seed}:newsshare:${t.p.id}:${tickNo}`, t.like, t.news.title, t.news.topic,
+        );
+        return { t, text, topic: t.news.topic };
+      }
+      const { text, topic } = await makePost(
+        `${world.seed}:post:${t.p.id}:${tickNo}`, t.like, t.kind, { mood: t.mood, focus: t.focus },
+      );
+      return { t, text, topic };
+    }),
+  );
+
+  for (const g of generatedPosts) {
+    const { t } = g;
+    if (t.news) {
+      await prisma.post.create({
+        data: {
+          authorId: t.p.id, simDay: day, kind: "news", topic: t.news.topic, text: g.text,
+          link: t.news.url, linkTitle: t.news.title, linkSource: t.news.source,
+        },
+      });
+      await markShared(t.news.id);
+      await remember(t.p.id, day, "fact", `Read and shared news about ${t.news.topic}: "${trim(t.news.title)}"`, 0.9);
+    } else {
+      await prisma.post.create({
+        data: { authorId: t.p.id, simDay: day, kind: t.kind, topic: g.topic, text: g.text },
+      });
+      if (t.rememberIt) {
+        await remember(t.p.id, day, "post", `I posted about ${g.topic ?? "life"}: "${trim(g.text)}"`, 0.6);
+      }
     }
     posts++;
   }
@@ -250,6 +292,21 @@ export async function tick(): Promise<TickReport> {
   }
 
   const relTouch = new Map<string, number>(); // pairKey -> interaction weight
+
+  // Comments are collected during the sequential scan, then generated in parallel.
+  interface CommentTask {
+    postId: string;
+    kind: string;
+    text: string;
+    topic: string | null;
+    headline: string | null;
+    viewerId: string;
+    viewerLike: PersonaLike;
+    authorName: string;
+    authorMood: string;
+    memInterest: string | null;
+  }
+  const commentTasks: CommentTask[] = [];
 
   for (const post of recentPosts) {
     const author = byId.get(post.authorId);
@@ -297,30 +354,42 @@ export async function tick(): Promise<TickReport> {
         bump(relTouch, viewer.id, post.authorId, 0.05 + shared * 0.015);
       }
 
-      // comment (rarer) — skill-driven, responds to the actual post
+      // comment (rarer) — decide now, generate in parallel after the scan
       if (rng.chance(Math.min(0.22, 0.015 + affinity * 0.4))) {
-        const { text } = await makeComment(
-          `${world.seed}:cmt:${post.id}:${viewer.id}`,
-          toPersonaLike(viewer, day),
-          { kind: post.kind, text: post.text, topic: post.topic, headline: post.linkTitle, authorMood: author.mood },
-          author.firstName,
-        );
-        await prisma.comment.create({
-          data: { postId: post.id, authorId: viewer.id, text, simDay: day },
-        });
-        comments++;
         bump(relTouch, viewer.id, post.authorId, 0.1 + shared * 0.02);
-        // remember a real conversation over a shared interest
+        let memInterest: string | null = null;
         if (shared > 0 && rng.chance(0.3)) {
           const common = interestsOf(viewer).filter((i) => authorInterests.has(i));
-          if (common.length) {
-            await remember(
-              viewer.id, day, "relationship",
-              `Talked with ${author.firstName} about ${rng.pick(common)}.`, 0.9,
-            );
-          }
+          if (common.length) memInterest = rng.pick(common);
         }
+        commentTasks.push({
+          postId: post.id, kind: post.kind, text: post.text, topic: post.topic,
+          headline: post.linkTitle, viewerId: viewer.id, viewerLike: toPersonaLike(viewer, day),
+          authorName: author.firstName, authorMood: author.mood, memInterest,
+        });
       }
+    }
+  }
+
+  // Generate all comment text in parallel (bounded concurrency), then persist.
+  const madeComments = await Promise.all(
+    commentTasks.map(async (t) => {
+      const { text } = await makeComment(
+        `${world.seed}:cmt:${t.postId}:${t.viewerId}`,
+        t.viewerLike,
+        { kind: t.kind, text: t.text, topic: t.topic, headline: t.headline, authorMood: t.authorMood },
+        t.authorName,
+      );
+      return { t, text };
+    }),
+  );
+  for (const { t, text } of madeComments) {
+    await prisma.comment.create({
+      data: { postId: t.postId, authorId: t.viewerId, text, simDay: day },
+    });
+    comments++;
+    if (t.memInterest) {
+      await remember(t.viewerId, day, "relationship", `Talked with ${t.authorName} about ${t.memInterest}.`, 0.9);
     }
   }
 
@@ -522,40 +591,6 @@ function soulInputFor(p: Persona, day: number, insights: string[]): SoulInput {
     insights,
     day,
   };
-}
-
-/**
- * Try to share a real news headline on `topic`. Returns true if a post was made.
- * Falls back (returns false) when there's no news available (e.g. offline).
- */
-async function tryNewsShare(
-  seed: string,
-  tickNo: number,
-  p: Persona,
-  like: PersonaLike,
-  topic: string,
-  day: number,
-): Promise<boolean> {
-  const items = await getNewsForTopic(topic, day, 6);
-  if (!items.length) return false;
-  const shareRng = new RNG(`${seed}:news:${p.id}:${tickNo}`);
-  const item = shareRng.pick(items);
-  const text = await makeNewsShare(`${seed}:newsshare:${p.id}:${tickNo}`, like, item.title, topic);
-  await prisma.post.create({
-    data: {
-      authorId: p.id,
-      simDay: day,
-      kind: "news",
-      topic,
-      text,
-      link: item.url,
-      linkTitle: item.title,
-      linkSource: item.source,
-    },
-  });
-  await markShared(item.id);
-  await remember(p.id, day, "fact", `Read and shared news about ${topic}: "${trim(item.title)}"`, 0.9);
-  return true;
 }
 
 async function partneredSet(): Promise<Set<string>> {
