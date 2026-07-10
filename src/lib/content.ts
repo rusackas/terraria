@@ -31,7 +31,7 @@ export async function makePost(
   persona: PersonaLike,
   kind: string,
   hb?: Heartbeat,
-): Promise<{ text: string; topic: string | null } | null> {
+): Promise<{ text: string; topic: string | null; imagePrompt: string | null } | null> {
   const focus = hb?.focus || persona.interests[0] || "life";
   const mood = hb?.mood ?? "content";
 
@@ -42,10 +42,24 @@ export async function makePost(
         ? `share a short honest opinion or something you've been turning over lately (maybe about ${focus})`
         : `post about your day, how you're feeling, or ${focus}`;
 
-  const prompt = `You are ${persona.firstName}, a ${persona.age}-year-old ${persona.occupation} in ${persona.city}. Interests: ${persona.interests.join(", ")}. Right now you feel ${mood} (${moodTone(mood)}). Write ONE short, natural first-person social-media post (max 2 sentences, no hashtags unless they truly fit) — ${ask}. Sound like a specific real person, not a brand. Personality: ${describeTraits(persona)}. Just the post text.`;
+  const prompt = `You are ${persona.firstName}, a ${persona.age}-year-old ${persona.occupation} in ${persona.city}. Interests: ${persona.interests.join(", ")}. Right now you feel ${mood} (${moodTone(mood)}). Write ONE short, natural first-person social-media post (max 2 sentences, no hashtags unless they truly fit) — ${ask}. Sound like a specific real person, not a brand. Personality: ${describeTraits(persona)}.
+Then on a NEW line, decide whether you'd attach a photo. Most posts have none. Only attach one if it genuinely fits — something you made, saw, ate, are doing, or a place you're at. Write exactly one of:
+PHOTO: none
+PHOTO: <a short plain visual description of the photo, no people's faces>
+Output the post text first, then the PHOTO line. Nothing else.`;
 
-  const text = await generate(prompt, 110);
-  return text ? { text, topic: focus } : null;
+  const raw = await generate(prompt, 140);
+  if (!raw) return null;
+  return { ...parsePost(raw), topic: focus };
+}
+
+// Split an LLM post response into its text and an optional attached-photo prompt.
+function parsePost(raw: string): { text: string; imagePrompt: string | null } {
+  const m = raw.match(/PHOTO:\s*([\s\S]*)$/i);
+  const text = raw.replace(/\n?\s*PHOTO:[\s\S]*$/i, "").trim();
+  const photo = m ? m[1].trim() : "";
+  const imagePrompt = photo && !/^none\b/i.test(photo) && photo.length > 3 ? photo.replace(/^["']|["']$/g, "") : null;
+  return { text: text || raw.trim(), imagePrompt };
 }
 
 /** A persona shares a real news headline they found on one of their interests. */

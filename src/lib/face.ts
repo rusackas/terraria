@@ -115,7 +115,7 @@ function mfluxCommand(model: string): string {
 
 let mfluxMissing = false; // set once if the mflux binary isn't found
 
-async function viaMflux(seed: string, d: FaceDemographics): Promise<string | null> {
+async function viaMflux(seed: string, prompt: string): Promise<string | null> {
   if (mfluxMissing) return null;
   const cmd = mfluxCommand(MODEL);
   const os = await import("node:os");
@@ -126,13 +126,13 @@ async function viaMflux(seed: string, d: FaceDemographics): Promise<string | nul
   const { promisify } = await import("node:util");
   const run = promisify(execFile);
 
-  const out = path.join(os.tmpdir(), `terraria-face-${randomUUID()}.png`);
+  const out = path.join(os.tmpdir(), `terraria-img-${randomUUID()}.png`);
   try {
     await run(
       cmd,
       [
         "--model", MODEL,
-        "--prompt", buildFacePrompt(d),
+        "--prompt", prompt,
         "--seed", String(seedInt(seed)),
         "--steps", String(steps(4)),
         "--width", String(SIZE),
@@ -167,7 +167,7 @@ async function viaMflux(seed: string, d: FaceDemographics): Promise<string | nul
 
 let sdcppMissing = false; // set once if the sd binary isn't found
 
-async function viaSdcpp(seed: string, d: FaceDemographics): Promise<string | null> {
+async function viaSdcpp(seed: string, prompt: string, negative: string): Promise<string | null> {
   if (sdcppMissing) return null;
   const os = await import("node:os");
   const path = await import("node:path");
@@ -177,12 +177,12 @@ async function viaSdcpp(seed: string, d: FaceDemographics): Promise<string | nul
   const { promisify } = await import("node:util");
   const run = promisify(execFile);
 
-  const out = path.join(os.tmpdir(), `terraria-face-${randomUUID()}.png`);
+  const out = path.join(os.tmpdir(), `terraria-img-${randomUUID()}.png`);
   const args = [
     "-M", "img_gen",
     "-m", SDCPP_MODEL,
-    "-p", buildFacePrompt(d),
-    "-n", NEGATIVE,
+    "-p", prompt,
+    "-n", negative,
     "--steps", String(steps(22)),
     "--cfg-scale", String(CFG),
     "-W", String(SIZE),
@@ -217,14 +217,14 @@ async function viaSdcpp(seed: string, d: FaceDemographics): Promise<string | nul
 
 // ── Automatic1111 HTTP backend ──────────────────────────────────────────────
 
-async function viaA1111(seed: string, d: FaceDemographics): Promise<string | null> {
+async function viaA1111(seed: string, prompt: string, negative: string): Promise<string | null> {
   try {
     const res = await fetch(`${HOST}/sdapi/v1/txt2img`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        prompt: buildFacePrompt(d),
-        negative_prompt: NEGATIVE,
+        prompt,
+        negative_prompt: negative,
         steps: steps(22),
         width: SIZE,
         height: SIZE,
@@ -242,14 +242,30 @@ async function viaA1111(seed: string, d: FaceDemographics): Promise<string | nul
   }
 }
 
-/** Generate a portrait. Returns base64 PNG (no data-URI prefix), or null if the
- *  active image backend is off/unavailable or the generation fails. */
-export async function generateFace(seed: string, d: FaceDemographics): Promise<string | null> {
+/** Dispatch a prompt to the active image backend. Returns base64 PNG or null. */
+function runImage(seed: string, prompt: string, negative: string): Promise<string | null> {
   const b = imageBackend();
-  if (b === "off") return null;
-  if (b === "a1111") return viaA1111(seed, d);
-  if (b === "sdcpp") return viaSdcpp(seed, d);
-  return viaMflux(seed, d);
+  if (b === "off") return Promise.resolve(null);
+  if (b === "a1111") return viaA1111(seed, prompt, negative);
+  if (b === "sdcpp") return viaSdcpp(seed, prompt, negative);
+  return viaMflux(seed, prompt);
+}
+
+/** Generate a persona portrait from demographics. */
+export function generateFace(seed: string, d: FaceDemographics): Promise<string | null> {
+  return runImage(seed, buildFacePrompt(d), NEGATIVE);
+}
+
+/** Turn a persona's photo description into a realistic-photo prompt. */
+export function buildContentPrompt(desc: string): string {
+  const cleaned = desc.trim().replace(/^(a\s+)?(photo|picture|pic|image|shot)\s+of\s+/i, "");
+  return `a realistic candid photograph of ${cleaned}, natural lighting, sharp focus, high detail`;
+}
+
+/** Generate an arbitrary image from a free-text description (e.g. a photo a
+ *  persona is "posting"). */
+export function generateImage(seed: string, desc: string): Promise<string | null> {
+  return runImage(seed, buildContentPrompt(desc), NEGATIVE);
 }
 
 /** Is the active image backend ready to generate? Returns not-ready with a human

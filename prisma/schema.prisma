@@ -98,7 +98,8 @@ model Post {
   kind      String // status | opinion | milestone | life_event | news | photo
   topic     String?
   text      String
-  image     String? // path to an attached image (e.g. a new profile picture)
+  imagePrompt String? // a photo the persona chose to attach (generated later)
+  image     String? // path to an attached image (profile pic, or a generated photo)
   link      String? // source URL for shared news
   linkTitle String? // headline / source title
   linkSource String? // publisher

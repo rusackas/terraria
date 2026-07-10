@@ -231,10 +231,10 @@ export async function tick(): Promise<TickReport> {
       postTasks.map(async (t) => {
         if (t.news) {
           const text = await makeNewsShare(t.like, t.news.title, t.news.topic);
-          return text ? { t, text, topic: t.news.topic } : null;
+          return text ? { t, text, topic: t.news.topic, imagePrompt: null } : null;
         }
         const made = await makePost(t.like, t.kind, { mood: t.mood, focus: t.focus });
-        return made ? { t, text: made.text, topic: made.topic } : null;
+        return made ? { t, text: made.text, topic: made.topic, imagePrompt: made.imagePrompt } : null;
       }),
     )
   ).flatMap((g) => (g ? [g] : []));
@@ -253,7 +253,7 @@ export async function tick(): Promise<TickReport> {
       newsShared++;
     } else {
       await prisma.post.create({
-        data: { authorId: t.p.id, simDay: day, kind: t.kind, topic: g.topic, text: g.text },
+        data: { authorId: t.p.id, simDay: day, kind: t.kind, topic: g.topic, text: g.text, imagePrompt: g.imagePrompt },
       });
       if (t.rememberIt) {
         await remember(t.p.id, day, "post", `I posted about ${g.topic ?? "life"}: "${trim(g.text)}"`, 0.6);

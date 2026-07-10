@@ -282,7 +282,18 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
                   />
                 </>
               ) : (
-                post.text && <p className="text-[0.95rem]">{post.text}</p>
+                <>
+                  {post.text && <p className="text-[0.95rem]">{post.text}</p>}
+                  {post.image && (
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    <img
+                      src={post.image}
+                      alt="attached photo"
+                      className="mt-1.5 rounded-xl border border-[var(--border)] w-full max-w-[220px] object-cover"
+                      loading="lazy"
+                    />
+                  )}
+                </>
               )}
               <div className="mt-1 text-xs text-[var(--muted)] flex gap-3">
                 <span>{simDate(post.simDay)}</span>

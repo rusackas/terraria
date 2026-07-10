@@ -66,7 +66,18 @@ export function PostCard({ post }: { post: FeedPost }) {
               />
             </>
           ) : (
-            post.text && <p className="mt-1.5 text-[0.95rem] leading-relaxed">{post.text}</p>
+            <>
+              {post.text && <p className="mt-1.5 text-[0.95rem] leading-relaxed">{post.text}</p>}
+              {post.image && (
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img
+                  src={post.image}
+                  alt="attached photo"
+                  className="mt-2 rounded-xl border border-[var(--border)] w-full max-w-[420px] object-cover"
+                  loading="lazy"
+                />
+              )}
+            </>
           )}
 
           {post.link && (

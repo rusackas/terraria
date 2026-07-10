@@ -50,3 +50,4 @@ dev.db
 
 # Generated profile photos
 /public/faces/
+/public/photos/

@@ -13,6 +13,7 @@
     "tick": "tsx scripts/tick.ts",
     "world": "tsx scripts/world.ts",
     "faces": "tsx scripts/faces.ts",
+    "photos": "tsx scripts/photos.ts",
     "handles": "tsx scripts/handles.ts",
     "souls": "tsx scripts/souls.ts",
     "db:push": "prisma db push",
