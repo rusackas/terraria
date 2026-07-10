@@ -159,6 +159,52 @@ export async function getPerson(id: string) {
     avatarSvg: string | null;
   }[];
 
+  // People You May Know: friends-of-friends (one degree out), ranked by mutual
+  // connections then shared interests, excluding people already connected.
+  const directSet = new Set(otherIds);
+  const connectedOrSelf = new Set([...otherIds, id]);
+  const secondRels = otherIds.length
+    ? await prisma.relationship.findMany({
+        where: { OR: [{ aId: { in: otherIds } }, { bId: { in: otherIds } }] },
+        select: { aId: true, bId: true },
+      })
+    : [];
+  const mutualMap = new Map<string, Set<string>>(); // candidate -> shared friends
+  for (const r of secondRels) {
+    const aDirect = directSet.has(r.aId);
+    const bDirect = directSet.has(r.bId);
+    let friend: string, cand: string;
+    if (aDirect && !bDirect) { friend = r.aId; cand = r.bId; }
+    else if (bDirect && !aDirect) { friend = r.bId; cand = r.aId; }
+    else continue;
+    if (connectedOrSelf.has(cand)) continue;
+    let set = mutualMap.get(cand);
+    if (!set) mutualMap.set(cand, (set = new Set()));
+    set.add(friend);
+  }
+  const myInterests = new Set(safeJson(p.interests));
+  const candidates = mutualMap.size
+    ? await prisma.persona.findMany({
+        where: { id: { in: [...mutualMap.keys()] }, alive: true },
+        include: { avatars: { where: { current: true }, take: 1 } },
+      })
+    : [];
+  const peopleYouMayKnow = candidates
+    .map((c) => {
+      const shared = safeJson(c.interests).filter((x) => myInterests.has(x));
+      return {
+        id: c.id,
+        name: `${c.firstName} ${c.lastName}`,
+        occupation: c.occupation,
+        city: c.city,
+        avatarSvg: c.avatars[0]?.svg ?? null,
+        mutual: mutualMap.get(c.id)!.size,
+        sharedInterests: shared,
+      };
+    })
+    .sort((a, b) => b.mutual - a.mutual || b.sharedInterests.length - a.sharedInterests.length)
+    .slice(0, 6);
+
   const endDay = p.deathDay ?? world.currentDay;
 
   return {
@@ -203,6 +249,7 @@ export async function getPerson(id: string) {
     lifeEvents: p.lifeEvents.map((e) => ({ id: e.id, type: e.type, description: e.description, simDay: e.simDay })),
     memories: p.memories.map((m) => ({ id: m.id, kind: m.kind, content: m.content, simDay: m.simDay })),
     relationships,
+    peopleYouMayKnow,
     world,
   };
 }

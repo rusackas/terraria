@@ -192,6 +192,33 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
         </section>
       </div>
 
+      {/* People you may know */}
+      {p.alive && p.peopleYouMayKnow.length > 0 && (
+        <section className="card p-5">
+          <h2 className="text-sm font-semibold text-[var(--muted)] uppercase tracking-wide">
+            People {p.firstName} may know
+          </h2>
+          <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {p.peopleYouMayKnow.map((s) => (
+              <Link
+                key={s.id}
+                href={`/people/${s.id}`}
+                className="flex items-center gap-3 rounded-lg p-2 -m-0.5 hover:bg-[var(--surface-2)] transition-colors"
+              >
+                <Avatar svg={s.avatarSvg} size={40} alt={s.name} />
+                <div className="min-w-0">
+                  <div className="text-sm font-medium truncate">{s.name}</div>
+                  <div className="text-xs text-[var(--muted)] truncate">
+                    {s.mutual} mutual{s.mutual === 1 ? "" : "s"}
+                    {s.sharedInterests.length > 0 && ` · shares ${s.sharedInterests.slice(0, 2).join(", ")}`}
+                  </div>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
+
       {/* Life timeline */}
       {p.lifeEvents.length > 0 && (
         <section className="card p-5">
