@@ -16,6 +16,7 @@ import type { Persona } from "@prisma/client";
 
 const AVATAR_REFRESH_YEARS = 5;
 const NEWS_POSTS_PER_TICK = 12; // cap network + share volume per tick
+const INVITES_PER_TICK = 8; // cap new associates invited per tick
 
 export interface TickReport {
   tick: number;
@@ -28,6 +29,7 @@ export interface TickReport {
   newsShared: number;
   reflections: number;
   newRelationships: number;
+  invites: number;
   births: number;
   deaths: number;
   events: string[];
@@ -75,7 +77,7 @@ export async function tick(): Promise<TickReport> {
 
   const events: string[] = [];
   let posts = 0, comments = 0, reactions = 0, newRelationships = 0, births = 0, deaths = 0;
-  let newsShared = 0, reflections = 0;
+  let newsShared = 0, reflections = 0, invites = 0;
 
   const alive = await prisma.persona.findMany({ where: { alive: true } });
   const byId = new Map(alive.map((p) => [p.id, p]));
@@ -494,6 +496,25 @@ export async function tick(): Promise<TickReport> {
     }
   }
 
+  // 6.5) INVITES: like a real social network, existing residents bring in new
+  //      people they already know — a colleague, a friend from a hobby, an old
+  //      classmate — who share one of their interests and start connected.
+  for (const p of alive) {
+    if (invites >= INVITES_PER_TICK) break;
+    const age = ageOf(p.birthDay, day);
+    if (age < 18) continue;
+    const pInvite = 0.015 + p.openness * 0.03 + p.extraversion * 0.03;
+    if (!rng.chance(pInvite)) continue;
+
+    const inviteRng = new RNG(`${world.seed}:invite:${p.id}:${tickNo}:${invites}`);
+    const associate = await inviteAssociate(p, day, inviteRng);
+    if (associate) {
+      byId.set(associate.id, associate);
+      invites++;
+      events.push(`👋 ${p.firstName} invited ${associate.firstName} ${associate.lastName} (${associate.via}).`);
+    }
+  }
+
   // 7) REFLECTION: some personas pause and distill recent experience into an
   //    insight, which is written into their soul. This is how they grow.
   const stillAlive = await prisma.persona.findMany({
@@ -569,6 +590,7 @@ export async function tick(): Promise<TickReport> {
     newsShared,
     reflections,
     newRelationships,
+    invites,
     births,
     deaths,
     events: events.slice(0, 40),
@@ -665,6 +687,71 @@ async function linkFamily(childId: string, parentId: string, day: number) {
     create: { aId, bId, type: "family", strength: 1, sinceDay: day },
     update: { type: "family", strength: 1 },
   });
+}
+
+async function linkRelationship(a: string, b: string, type: string, strength: number, day: number) {
+  const [aId, bId] = pairKey(a, b);
+  await prisma.relationship.upsert({
+    where: { aId_bId: { aId, bId } },
+    create: { aId, bId, type, strength, sinceDay: day },
+    update: { type, strength },
+  });
+}
+
+/**
+ * An existing resident invites a new associate they already know — someone who
+ * shares one of their interests, met through work/hobby/school/neighborhood, and
+ * who starts already connected. Returns the new persona (+ how they know each
+ * other), or null if the inviter has no interests.
+ */
+async function inviteAssociate(inviter: Persona, day: number, rng: RNG) {
+  const interests = interestsOf(inviter);
+  if (!interests.length) return null;
+  const shared = rng.pick(interests);
+  const context = rng.weighted([
+    ["work", 3], ["hobby", 4], ["school", 2], ["neighborhood", 2],
+  ] as const);
+
+  const inviterAge = ageOf(inviter.birthDay, day);
+  const forcedAge =
+    context === "school"
+      ? Math.max(18, Math.min(90, inviterAge + rng.int(-3, 3)))
+      : rng.int(22, 68);
+
+  const gen = generatePersona(`${inviter.seed}:assoc:${day}:${rng.int(0, 1e9)}`, day, forcedAge);
+  if (!gen.interests.includes(shared)) gen.interests[0] = shared; // the tie that binds
+  if (context === "work") gen.occupation = inviter.occupation;
+  if (context === "school" || context === "neighborhood") {
+    gen.city = inviter.city;
+    gen.country = inviter.country;
+  }
+
+  const associate = await createPersona(gen, day);
+
+  const meta = {
+    work: { type: "friend", strength: 0.4, via: "a colleague",
+      inv: `Brought my colleague ${gen.firstName} into the network.`,
+      ass: `${inviter.firstName} invited me in — we work together.` },
+    hobby: { type: "friend", strength: 0.4, via: `a friend from ${shared}`,
+      inv: `Invited ${gen.firstName}, a friend from ${shared}.`,
+      ass: `${inviter.firstName} invited me in — we know each other through ${shared}.` },
+    school: { type: "close_friend", strength: 0.55, via: "an old classmate",
+      inv: `Reconnected with ${gen.firstName}, an old classmate.`,
+      ass: `${inviter.firstName} invited me in — we go way back to school.` },
+    neighborhood: { type: "acquaintance", strength: 0.25, via: "a neighbor",
+      inv: `Invited my neighbor ${gen.firstName}.`,
+      ass: `${inviter.firstName}, my neighbor, invited me in.` },
+  }[context];
+
+  await linkRelationship(inviter.id, associate.id, meta.type, meta.strength, day);
+  await prisma.lifeEvent.create({
+    data: { personaId: associate.id, simDay: day, type: "milestone",
+      description: `Joined the network, invited by ${inviter.firstName}.` },
+  });
+  await remember(inviter.id, day, "relationship", meta.inv, 1.0);
+  await remember(associate.id, day, "relationship", meta.ass, 1.0);
+
+  return Object.assign(associate, { via: meta.via });
 }
 
 export async function createPersona(gen: ReturnType<typeof generatePersona>, day: number) {

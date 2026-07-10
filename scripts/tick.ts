@@ -11,7 +11,7 @@ async function main() {
     console.log(
       `⏱  tick ${r.tick} — ${r.date} | pop ${r.population} | ` +
         `posts ${r.posts} (news ${r.newsShared}) comments ${r.comments} reactions ${r.reactions} | ` +
-        `reflections ${r.reflections} +rels ${r.newRelationships} births ${r.births} deaths ${r.deaths}`,
+        `reflections ${r.reflections} +rels ${r.newRelationships} invites ${r.invites} births ${r.births} deaths ${r.deaths}`,
     );
     for (const e of r.events) console.log(`     ${e}`);
   }
