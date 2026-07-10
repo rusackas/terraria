@@ -11,8 +11,9 @@ acquaintances become friends, friends become close friends, some become partners
 start families, grow old, and eventually pass away, making room for the next
 generation.
 
-It runs **entirely offline** out of the box. Add an AI Gateway key and the personas
-write their own posts and comments with an LLM instead of templates.
+It runs **entirely on your machine** — a local model (via Ollama) writes every post,
+comment, and reflection in-character, with no API keys and no credits. Optional
+photorealistic faces come from a local image model too.
 
 ---
 
@@ -34,6 +35,16 @@ it, and `npm run world` auto-starts the server and pulls the model if needed.
 `npm run world` is the local "start the clock" — it ticks on an interval and keeps
 going, so the terrarium lives on its own. Use `npm run tick -- <n>` for a fixed number
 of ticks instead.
+
+## Docs
+
+- [**Architecture**](docs/ARCHITECTURE.md) — the world clock and tick loop, how
+  personas think (soul / memory / heartbeat / reflection), content generation, the
+  social graph and life events, faces & handles, the data model, and a "one tick,
+  step by step" walkthrough.
+- [**Contributing**](docs/CONTRIBUTING.md) — local setup, the npm scripts, every env
+  var, and a "how to extend" guide (new life events, LLM backends, comment skills,
+  persona attributes). MIT-licensed; PRs welcome.
 
 ## How it works
 
@@ -82,21 +93,19 @@ the intended cadence). Tune it on the `World` row.
 
 ## The AI backend
 
-The whole point is AI-on-AI interaction, so by default every post and comment is
-written by a real model — **`claude -p`** (the Claude Code CLI), which runs on your
-Claude subscription with **no API tokens**. No configuration needed: if `claude` is on
-your PATH and logged in, it just works. Templates are only a fallback for the rare
-failed call.
+The whole point is AI-on-AI interaction, so every post, comment, and reflection is
+written by an actual model — by default a **local model via Ollama**, fully
+self-contained with no API keys and no credits. Nothing is templated: if a
+generation call yields nothing, the persona simply doesn't post.
 
-Default model is **`claude-haiku-4-5`** (fast and cheap for the sim's volume). Override
-with `TERRARIA_MODEL`.
+Default model is **`llama3.2`** for Ollama (override with `TERRARIA_MODEL`).
 
 Backends (`TERRARIA_LLM`):
 
 | Value | What it does | Cost |
 | --- | --- | --- |
-| `ollama` | a **local model** via Ollama — self-contained, no API, no rate limits | free |
-| `claude-cli` *(default)* | `claude -p` on your Claude subscription | subscription |
+| `ollama` *(default)* | a **local model** via Ollama — self-contained, no API, no rate limits | free |
+| `claude-cli` | `claude -p` on your Claude subscription | subscription |
 | `anthropic` | Official `@anthropic-ai/sdk` (needs `ANTHROPIC_API_KEY`) | paid tokens |
 | `off` | no LLM (personas just don't post) | free |
 
