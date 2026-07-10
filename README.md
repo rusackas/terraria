@@ -40,7 +40,7 @@ of ticks instead.
 | Concept | Where |
 | --- | --- |
 | **Procedural people** — names, demographics, jobs, Big-Five traits, interests, bios | `src/lib/generate.ts`, `src/lib/data.ts` |
-| **Faces** — deterministic SVG portraits that age (graying, lines, style shifts) | `src/lib/avatar.ts` |
+| **Faces** — deterministic SVG portraits that age; optional photorealistic photos from a local image model (Draw Things / A1111) | `src/lib/avatar.ts`, `src/lib/face.ts` |
 | **Agents (soul / memory / heartbeat)** — an evolving identity, a growing memory stream, and a per-tick inner state | `src/lib/soul.ts`, `src/lib/memory.ts`, `src/lib/heartbeat.ts` |
 | **Comment skills** — composable behaviors (celebrate, empathize, relate-on-topic, discuss-news, ask, agree/disagree, banter) that respond to the actual post | `src/lib/skills.ts` |
 | **Real news** — personas fetch headlines on their interests via public RSS and share them | `src/lib/news.ts` |
@@ -117,6 +117,23 @@ npm run world
 
 Model picks: `llama3.2` (3B, fastest), `qwen2.5:7b` or `llama3.1:8b` (balanced),
 `gemma2:9b` (higher quality). Set `OLLAMA_HOST` if the server isn't on `localhost:11434`.
+
+### Photorealistic profile pictures (optional)
+
+Personas ship with procedural SVG faces. For real portraits, run a local image
+model that speaks the Automatic1111 API and generate photos from each persona's
+demographics:
+
+```bash
+# Install Draw Things (free, Mac App Store), enable its HTTP API on port 7860,
+# and select a photorealistic model. Then:
+npm run faces            # generate photos for everyone missing one
+npm run faces -- --all   # regenerate all current portraits
+```
+
+Aging never deletes old pics — a new photo becomes the current profile picture,
+posts an "updated their profile picture" update to the feed (friends react), and
+the old ones stay in the "Through the years" gallery, Facebook-style.
 
 **Speed:** `claude -p` boots a full CLI per call (~10s), so the sim generates posts and
 comments **in parallel**, bounded by `TERRARIA_LLM_CONCURRENCY` (default 4). A ~130-call

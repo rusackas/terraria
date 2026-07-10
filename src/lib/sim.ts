@@ -365,7 +365,9 @@ export async function tick(): Promise<TickReport> {
           if (common.length) memInterest = rng.pick(common);
         }
         commentTasks.push({
-          postId: post.id, kind: post.kind, text: post.text, topic: post.topic,
+          postId: post.id, kind: post.kind,
+          text: post.kind === "photo" ? "just posted a new profile picture" : post.text,
+          topic: post.topic,
           headline: post.linkTitle, viewerId: viewer.id, viewerLike: toPersonaLike(viewer, day),
           authorName: author.firstName, authorMood: author.mood, memInterest,
         });

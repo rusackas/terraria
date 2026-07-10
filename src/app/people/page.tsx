@@ -55,7 +55,7 @@ export default async function PeoplePage({
             href={`/people/${p.id}`}
             className="card p-3 flex items-center gap-3 hover:border-[var(--accent)] transition-colors"
           >
-            <Avatar svg={p.avatarSvg} size={52} alt={p.firstName} dim={!p.alive} />
+            <Avatar svg={p.avatarSvg} photo={p.avatarPhoto} size={52} alt={p.firstName} dim={!p.alive} />
             <div className="min-w-0">
               <div className="font-medium truncate">
                 {p.firstName} {p.lastName}{" "}

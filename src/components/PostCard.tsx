@@ -18,14 +18,16 @@ const KIND_LABEL: Record<string, string> = {
   milestone: "milestone",
   life_event: "life event",
   news: "news",
+  photo: "new photo",
 };
 
 export function PostCard({ post }: { post: FeedPost }) {
+  const isPhoto = post.kind === "photo" && !!post.image;
   return (
     <article className="card p-4">
       <div className="flex items-start gap-3">
         <Link href={`/people/${post.author.id}`}>
-          <Avatar svg={post.author.avatarSvg} size={44} alt={post.author.firstName} />
+          <Avatar svg={post.author.avatarSvg} photo={post.author.avatarPhoto} size={44} alt={post.author.firstName} />
         </Link>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
@@ -41,7 +43,22 @@ export function PostCard({ post }: { post: FeedPost }) {
             </span>
           </div>
 
-          <p className="mt-1.5 text-[0.95rem] leading-relaxed">{post.text}</p>
+          {isPhoto ? (
+            <>
+              <p className="mt-1.5 text-sm text-[var(--muted)]">
+                updated their profile picture{post.text ? ` — ${post.text}` : ""}
+              </p>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={post.image!}
+                alt={`${post.author.firstName}'s new profile picture`}
+                className="mt-2 rounded-xl border border-[var(--border)] w-full max-w-[280px] aspect-square object-cover"
+                loading="lazy"
+              />
+            </>
+          ) : (
+            post.text && <p className="mt-1.5 text-[0.95rem] leading-relaxed">{post.text}</p>
+          )}
 
           {post.link && (
             <a

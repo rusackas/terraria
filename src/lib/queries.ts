@@ -14,10 +14,11 @@ export interface FeedPost {
   simDay: number;
   kind: string;
   text: string;
+  image: string | null;
   link: string | null;
   linkTitle: string | null;
   linkSource: string | null;
-  author: { id: string; firstName: string; lastName: string; avatarSvg: string | null };
+  author: { id: string; firstName: string; lastName: string; avatarSvg: string | null; avatarPhoto: string | null };
   reactions: { type: string; count: number }[];
   reactionTotal: number;
   comments: {
@@ -51,6 +52,7 @@ export async function getFeed(limit = 40): Promise<FeedPost[]> {
       simDay: p.simDay,
       kind: p.kind,
       text: p.text,
+      image: p.image,
       link: p.link,
       linkTitle: p.linkTitle,
       linkSource: p.linkSource,
@@ -59,6 +61,7 @@ export async function getFeed(limit = 40): Promise<FeedPost[]> {
         firstName: p.author.firstName,
         lastName: p.author.lastName,
         avatarSvg: p.author.avatars[0]?.svg ?? null,
+        avatarPhoto: p.author.avatars[0]?.photo ?? null,
       },
       reactions: [...counts.entries()]
         .map(([type, count]) => ({ type, count }))
@@ -103,6 +106,7 @@ export async function listPeople(opts: { q?: string; onlyAlive?: boolean } = {})
     alive: p.alive,
     age: ageOf(p.birthDay, p.deathDay ?? world.currentDay),
     avatarSvg: p.avatars[0]?.svg ?? null,
+    avatarPhoto: p.avatars[0]?.photo ?? null,
   }));
 }
 
@@ -148,6 +152,7 @@ export async function getPerson(id: string) {
         strength: r.strength,
         alive: o.alive,
         avatarSvg: o.avatars[0]?.svg ?? null,
+        avatarPhoto: o.avatars[0]?.photo ?? null,
       };
     })
     .filter(Boolean) as {
@@ -157,6 +162,7 @@ export async function getPerson(id: string) {
     strength: number;
     alive: boolean;
     avatarSvg: string | null;
+    avatarPhoto: string | null;
   }[];
 
   // People You May Know: friends-of-friends (one degree out), ranked by mutual
@@ -198,6 +204,7 @@ export async function getPerson(id: string) {
         occupation: c.occupation,
         city: c.city,
         avatarSvg: c.avatars[0]?.svg ?? null,
+        avatarPhoto: c.avatars[0]?.photo ?? null,
         mutual: mutualMap.get(c.id)!.size,
         sharedInterests: shared,
       };
@@ -234,12 +241,13 @@ export async function getPerson(id: string) {
       agreeableness: p.agreeableness,
       neuroticism: p.neuroticism,
     },
-    avatars: p.avatars.map((a) => ({ svg: a.svg, ageYears: a.ageYears, simDay: a.simDay, current: a.current })),
+    avatars: p.avatars.map((a) => ({ svg: a.svg, photo: a.photo, ageYears: a.ageYears, simDay: a.simDay, current: a.current })),
     posts: p.posts.map((post) => ({
       id: post.id,
       text: post.text,
       kind: post.kind,
       simDay: post.simDay,
+      image: post.image,
       link: post.link,
       linkTitle: post.linkTitle,
       linkSource: post.linkSource,

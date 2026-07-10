@@ -81,7 +81,8 @@ model Avatar {
   personaId String
   simDay    Int
   ageYears  Int
-  svg       String // rendered SVG markup
+  svg       String // rendered SVG markup (procedural fallback)
+  photo     String? // path to a generated photorealistic portrait, if any
   current   Boolean @default(true)
   createdAt DateTime @default(now())
 
@@ -93,9 +94,10 @@ model Post {
   author    Persona @relation(fields: [authorId], references: [id], onDelete: Cascade)
   authorId  String
   simDay    Int
-  kind      String // status | opinion | milestone | life_event | news
+  kind      String // status | opinion | milestone | life_event | news | photo
   topic     String?
   text      String
+  image     String? // path to an attached image (e.g. a new profile picture)
   link      String? // source URL for shared news
   linkTitle String? // headline / source title
   linkSource String? // publisher

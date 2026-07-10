@@ -57,7 +57,7 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
       {/* Header */}
       <section className="card p-5">
         <div className="flex items-start gap-4">
-          <Avatar svg={current?.svg ?? null} size={96} alt={p.firstName} ring dim={!p.alive} />
+          <Avatar svg={current?.svg ?? null} photo={current?.photo ?? null} size={96} alt={p.firstName} ring dim={!p.alive} />
           <div className="min-w-0 flex-1">
             <h1 className="text-2xl font-semibold tracking-tight">
               {p.firstName} {p.lastName}
@@ -128,7 +128,7 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
           <div className="mt-3 flex gap-4 overflow-x-auto pb-1">
             {p.avatars.map((a, i) => (
               <div key={i} className="text-center shrink-0">
-                <Avatar svg={a.svg} size={64} alt={`age ${a.ageYears}`} ring={a.current} />
+                <Avatar svg={a.svg} photo={a.photo} size={64} alt={`age ${a.ageYears}`} ring={a.current} />
                 <div className="mt-1 text-xs text-[var(--muted)]">age {a.ageYears}</div>
               </div>
             ))}
@@ -175,7 +175,7 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
                 href={`/people/${r.id}`}
                 className="flex items-center gap-2.5 hover:bg-[var(--surface-2)] rounded-lg p-1 -m-1 transition-colors"
               >
-                <Avatar svg={r.avatarSvg} size={32} alt={r.name} dim={!r.alive} />
+                <Avatar svg={r.avatarSvg} photo={r.avatarPhoto} size={32} alt={r.name} dim={!r.alive} />
                 <span className="text-sm truncate flex-1">{r.name}</span>
                 <span
                   className={
@@ -205,7 +205,7 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
                 href={`/people/${s.id}`}
                 className="flex items-center gap-3 rounded-lg p-2 -m-0.5 hover:bg-[var(--surface-2)] transition-colors"
               >
-                <Avatar svg={s.avatarSvg} size={40} alt={s.name} />
+                <Avatar svg={s.avatarSvg} photo={s.avatarPhoto} size={40} alt={s.name} />
                 <div className="min-w-0">
                   <div className="text-sm font-medium truncate">{s.name}</div>
                   <div className="text-xs text-[var(--muted)] truncate">
@@ -266,7 +266,20 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
           )}
           {p.posts.map((post) => (
             <div key={post.id} className="border-b border-[var(--border)] last:border-0 pb-3 last:pb-0">
-              <p className="text-[0.95rem]">{post.text}</p>
+              {post.kind === "photo" && post.image ? (
+                <>
+                  <p className="text-sm text-[var(--muted)]">updated their profile picture</p>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={post.image}
+                    alt="new profile picture"
+                    className="mt-1.5 rounded-xl border border-[var(--border)] w-full max-w-[200px] aspect-square object-cover"
+                    loading="lazy"
+                  />
+                </>
+              ) : (
+                post.text && <p className="text-[0.95rem]">{post.text}</p>
+              )}
               <div className="mt-1 text-xs text-[var(--muted)] flex gap-3">
                 <span>{simDate(post.simDay)}</span>
                 {post.reactionTotal > 0 && <span>♥ {post.reactionTotal}</span>}
