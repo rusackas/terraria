@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { getPerson } from "@/lib/queries";
 import { Avatar } from "@/components/Avatar";
 import { SoulView } from "@/components/SoulView";
+import { PostCard } from "@/components/PostCard";
 import { simDate } from "@/lib/time";
 
 const MOOD_EMOJI: Record<string, string> = {
@@ -51,9 +52,11 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
   if (!p) notFound();
 
   const current = p.avatars.find((a) => a.current) ?? p.avatars[p.avatars.length - 1];
+  const poss = p.pronouns.startsWith("she") ? "her" : p.pronouns.startsWith("he") ? "his" : "their";
 
   return (
-    <div className="space-y-5">
+    <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_360px] lg:gap-6 lg:items-start">
+      <div className="space-y-5 min-w-0">
       {/* Header */}
       <section className="card p-5">
         <div className="flex items-start gap-4">
@@ -290,6 +293,26 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
           ))}
         </div>
       </section>
+      </div>
+
+      {/* Right column: her home feed — what she'd see from her network */}
+      <aside className="mt-5 lg:mt-0 space-y-3">
+        <div className="card p-4">
+          <h2 className="text-sm font-semibold text-[var(--muted)] uppercase tracking-wide">
+            {p.firstName}&apos;s feed
+          </h2>
+          <p className="mt-1 text-xs text-[var(--muted)]">
+            what {p.firstName} sees from {poss} network
+          </p>
+        </div>
+        {p.homeFeed.length === 0 ? (
+          <p className="px-1 text-sm text-[var(--muted)]">
+            Quiet so far — no one in {poss} network has posted yet.
+          </p>
+        ) : (
+          p.homeFeed.map((post) => <PostCard key={post.id} post={post} />)
+        )}
+      </aside>
     </div>
   );
 }

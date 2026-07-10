@@ -14,7 +14,7 @@ export default async function FeedPage() {
   const alive = people.length;
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 mx-auto max-w-2xl">
       <section className="card p-5">
         <h1 className="text-xl font-semibold tracking-tight">The Terrarium</h1>
         <p className="mt-1 text-sm text-[var(--muted)]">

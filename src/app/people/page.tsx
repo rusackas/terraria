@@ -15,7 +15,7 @@ export default async function PeoplePage({
   const people = await listPeople({ q, onlyAlive: !showAll });
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 mx-auto max-w-4xl">
       <div className="flex items-center gap-3 flex-wrap">
         <h1 className="text-xl font-semibold tracking-tight">Residents</h1>
         <span className="text-sm text-[var(--muted)]">{people.length} shown</span>

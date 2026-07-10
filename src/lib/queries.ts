@@ -1,5 +1,53 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "./db";
 import { ageOf } from "./time";
+
+// Shared include + mapper so the global feed and a persona's home feed stay in sync.
+const feedPostInclude = Prisma.validator<Prisma.PostInclude>()({
+  author: { include: { avatars: { where: { current: true }, take: 1 } } },
+  reactions: { select: { type: true } },
+  comments: {
+    orderBy: { createdAt: "asc" },
+    take: 3,
+    include: { author: { select: { id: true, handle: true, firstName: true, lastName: true } } },
+  },
+});
+type FeedPostRow = Prisma.PostGetPayload<{ include: typeof feedPostInclude }>;
+
+function toFeedPost(p: FeedPostRow): FeedPost {
+  const counts = new Map<string, number>();
+  for (const r of p.reactions) counts.set(r.type, (counts.get(r.type) ?? 0) + 1);
+  return {
+    id: p.id,
+    simDay: p.simDay,
+    createdAt: p.createdAt.toISOString(),
+    kind: p.kind,
+    text: p.text,
+    image: p.image,
+    link: p.link,
+    linkTitle: p.linkTitle,
+    linkSource: p.linkSource,
+    author: {
+      id: p.author.id,
+      handle: p.author.handle,
+      firstName: p.author.firstName,
+      lastName: p.author.lastName,
+      avatarSvg: p.author.avatars[0]?.svg ?? null,
+      avatarPhoto: p.author.avatars[0]?.photo ?? null,
+    },
+    reactions: [...counts.entries()]
+      .map(([type, count]) => ({ type, count }))
+      .sort((a, b) => b.count - a.count),
+    reactionTotal: p.reactions.length,
+    comments: p.comments.map((c) => ({
+      id: c.id,
+      text: c.text,
+      simDay: c.simDay,
+      createdAt: c.createdAt.toISOString(),
+      author: c.author,
+    })),
+  };
+}
 
 export async function getWorld() {
   return prisma.world.upsert({
@@ -12,6 +60,7 @@ export async function getWorld() {
 export interface FeedPost {
   id: string;
   simDay: number;
+  createdAt: string; // real-world generation time (ISO)
   kind: string;
   text: string;
   image: string | null;
@@ -25,6 +74,7 @@ export interface FeedPost {
     id: string;
     text: string;
     simDay: number;
+    createdAt: string; // real-world generation time (ISO)
     author: { id: string; handle: string | null; firstName: string; lastName: string };
   }[];
 }
@@ -33,49 +83,9 @@ export async function getFeed(limit = 40): Promise<FeedPost[]> {
   const posts = await prisma.post.findMany({
     orderBy: [{ simDay: "desc" }, { createdAt: "desc" }],
     take: limit,
-    include: {
-      author: { include: { avatars: { where: { current: true }, take: 1 } } },
-      reactions: { select: { type: true } },
-      comments: {
-        orderBy: { createdAt: "asc" },
-        take: 3,
-        include: { author: { select: { id: true, handle: true, firstName: true, lastName: true } } },
-      },
-    },
+    include: feedPostInclude,
   });
-
-  return posts.map((p) => {
-    const counts = new Map<string, number>();
-    for (const r of p.reactions) counts.set(r.type, (counts.get(r.type) ?? 0) + 1);
-    return {
-      id: p.id,
-      simDay: p.simDay,
-      kind: p.kind,
-      text: p.text,
-      image: p.image,
-      link: p.link,
-      linkTitle: p.linkTitle,
-      linkSource: p.linkSource,
-      author: {
-        id: p.author.id,
-        handle: p.author.handle,
-        firstName: p.author.firstName,
-        lastName: p.author.lastName,
-        avatarSvg: p.author.avatars[0]?.svg ?? null,
-        avatarPhoto: p.author.avatars[0]?.photo ?? null,
-      },
-      reactions: [...counts.entries()]
-        .map(([type, count]) => ({ type, count }))
-        .sort((a, b) => b.count - a.count),
-      reactionTotal: p.reactions.length,
-      comments: p.comments.map((c) => ({
-        id: c.id,
-        text: c.text,
-        simDay: c.simDay,
-        author: c.author,
-      })),
-    };
-  });
+  return posts.map(toFeedPost);
 }
 
 export async function listPeople(opts: { q?: string; onlyAlive?: boolean } = {}) {
@@ -219,6 +229,17 @@ export async function getPerson(slug: string) {
     .sort((a, b) => b.mutual - a.mutual || b.sharedInterests.length - a.sharedInterests.length)
     .slice(0, 6);
 
+  // Home feed — what this persona would see: their own posts + their connections',
+  // newest first, like scrolling their own social feed.
+  const feedAuthorIds = [id, ...otherIds];
+  const hfPosts = await prisma.post.findMany({
+    where: { authorId: { in: feedAuthorIds } },
+    orderBy: [{ simDay: "desc" }, { createdAt: "desc" }],
+    take: 30,
+    include: feedPostInclude,
+  });
+  const homeFeed = hfPosts.map(toFeedPost);
+
   const endDay = p.deathDay ?? world.currentDay;
 
   return {
@@ -266,6 +287,7 @@ export async function getPerson(slug: string) {
     memories: p.memories.map((m) => ({ id: m.id, kind: m.kind, content: m.content, simDay: m.simDay })),
     relationships,
     peopleYouMayKnow,
+    homeFeed,
     world,
   };
 }

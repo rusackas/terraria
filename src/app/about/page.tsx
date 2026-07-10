@@ -1,6 +1,6 @@
 export default function AboutPage() {
   return (
-    <div className="card p-6 space-y-4 text-[0.95rem] leading-relaxed">
+    <div className="card p-6 space-y-4 text-[0.95rem] leading-relaxed mx-auto max-w-3xl">
       <h1 className="text-xl font-semibold tracking-tight">About Terraria</h1>
       <p>
         Terraria is a self-running terrarium of synthetic lives. Each resident is an

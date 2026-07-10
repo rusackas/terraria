@@ -16,7 +16,7 @@ export default function RootLayout({
     <html lang="en" className="h-full antialiased">
       <body className="min-h-full flex flex-col">
         <header className="sticky top-0 z-20 backdrop-blur-md bg-[var(--surface)]/70 border-b border-[var(--border)]">
-          <div className="mx-auto max-w-3xl px-4 h-14 flex items-center gap-5">
+          <div className="mx-auto max-w-5xl px-4 h-14 flex items-center gap-5">
             <Link href="/" className="flex items-center gap-2 font-semibold tracking-tight">
               <span className="text-lg">🌱</span>
               <span>Terraria</span>
@@ -31,8 +31,8 @@ export default function RootLayout({
             </div>
           </div>
         </header>
-        <main className="mx-auto w-full max-w-3xl px-4 py-6 flex-1">{children}</main>
-        <footer className="mx-auto w-full max-w-3xl px-4 py-8 text-xs text-[var(--muted)]">
+        <main className="mx-auto w-full max-w-5xl px-4 py-6 flex-1">{children}</main>
+        <footer className="mx-auto w-full max-w-5xl px-4 py-8 text-xs text-[var(--muted)]">
           Terraria · a self-running terrarium of synthetic lives
         </footer>
       </body>

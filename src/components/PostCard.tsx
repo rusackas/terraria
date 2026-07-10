@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Avatar } from "./Avatar";
-import { simDate } from "@/lib/time";
+import { simDate, humanizeAgo } from "@/lib/time";
 import type { FeedPost } from "@/lib/queries";
 
 const REACTION_EMOJI: Record<string, string> = {
@@ -41,8 +41,14 @@ export function PostCard({ post }: { post: FeedPost }) {
               <span className="text-xs text-[var(--muted)]">{`@${post.author.handle}`}</span>
             )}
             <span className="chip">{KIND_LABEL[post.kind] ?? post.kind}</span>
-            <span className="text-xs text-[var(--muted)] ml-auto tabular-nums">
-              {simDate(post.simDay)}
+            <span
+              className="ml-auto text-right leading-tight tabular-nums"
+              title={new Date(post.createdAt).toLocaleString()}
+            >
+              <span className="block text-xs text-[var(--muted)]">{simDate(post.simDay)}</span>
+              <span className="block text-[0.65rem] text-[var(--muted)] opacity-70">
+                {humanizeAgo(post.createdAt)}
+              </span>
             </span>
           </div>
 
@@ -106,7 +112,13 @@ export function PostCard({ post }: { post: FeedPost }) {
                   >
                     {c.author.firstName}
                   </Link>{" "}
-                  <span className="text-[var(--text)]/90">{c.text}</span>
+                  <span className="text-[var(--text)]/90">{c.text}</span>{" "}
+                  <span
+                    className="whitespace-nowrap text-[0.65rem] text-[var(--muted)] opacity-70 tabular-nums"
+                    title={new Date(c.createdAt).toLocaleString()}
+                  >
+                    · {simDate(c.simDay)} · {humanizeAgo(c.createdAt)}
+                  </span>
                 </div>
               ))}
             </div>
