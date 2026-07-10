@@ -12,6 +12,7 @@
     "tick": "tsx scripts/tick.ts",
     "world": "tsx scripts/world.ts",
     "faces": "tsx scripts/faces.ts",
+    "handles": "tsx scripts/handles.ts",
     "souls": "tsx scripts/souls.ts",
     "db:push": "prisma db push",
     "db:reset": "prisma db push --force-reset",

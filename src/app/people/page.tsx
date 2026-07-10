@@ -52,7 +52,7 @@ export default async function PeoplePage({
         {people.map((p) => (
           <Link
             key={p.id}
-            href={`/people/${p.id}`}
+            href={`/people/${p.handle ?? p.id}`}
             className="card p-3 flex items-center gap-3 hover:border-[var(--accent)] transition-colors"
           >
             <Avatar svg={p.avatarSvg} photo={p.avatarPhoto} size={52} alt={p.firstName} dim={!p.alive} />

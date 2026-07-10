@@ -21,8 +21,9 @@ model World {
 }
 
 model Persona {
-  id        String @id @default(cuid())
-  seed      String @unique // deterministic generation seed
+  id        String  @id @default(cuid())
+  seed      String  @unique // deterministic generation seed
+  handle    String? @unique // self-chosen social handle (used in profile URLs)
 
   firstName String
   lastName  String

@@ -62,6 +62,7 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
             <h1 className="text-2xl font-semibold tracking-tight">
               {p.firstName} {p.lastName}
             </h1>
+            {p.handle && <p className="text-sm text-[var(--accent)]">{`@${p.handle}`}</p>}
             <p className="text-sm text-[var(--muted)]">
               {p.age} years old · {p.pronouns} · {p.occupation}
             </p>
@@ -172,7 +173,7 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
             {p.relationships.slice(0, 30).map((r) => (
               <Link
                 key={r.id}
-                href={`/people/${r.id}`}
+                href={`/people/${r.handle ?? r.id}`}
                 className="flex items-center gap-2.5 hover:bg-[var(--surface-2)] rounded-lg p-1 -m-1 transition-colors"
               >
                 <Avatar svg={r.avatarSvg} photo={r.avatarPhoto} size={32} alt={r.name} dim={!r.alive} />
@@ -202,7 +203,7 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
             {p.peopleYouMayKnow.map((s) => (
               <Link
                 key={s.id}
-                href={`/people/${s.id}`}
+                href={`/people/${s.handle ?? s.id}`}
                 className="flex items-center gap-3 rounded-lg p-2 -m-0.5 hover:bg-[var(--surface-2)] transition-colors"
               >
                 <Avatar svg={s.avatarSvg} photo={s.avatarPhoto} size={40} alt={s.name} />

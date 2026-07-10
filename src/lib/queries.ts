@@ -18,14 +18,14 @@ export interface FeedPost {
   link: string | null;
   linkTitle: string | null;
   linkSource: string | null;
-  author: { id: string; firstName: string; lastName: string; avatarSvg: string | null; avatarPhoto: string | null };
+  author: { id: string; handle: string | null; firstName: string; lastName: string; avatarSvg: string | null; avatarPhoto: string | null };
   reactions: { type: string; count: number }[];
   reactionTotal: number;
   comments: {
     id: string;
     text: string;
     simDay: number;
-    author: { id: string; firstName: string; lastName: string };
+    author: { id: string; handle: string | null; firstName: string; lastName: string };
   }[];
 }
 
@@ -39,7 +39,7 @@ export async function getFeed(limit = 40): Promise<FeedPost[]> {
       comments: {
         orderBy: { createdAt: "asc" },
         take: 3,
-        include: { author: { select: { id: true, firstName: true, lastName: true } } },
+        include: { author: { select: { id: true, handle: true, firstName: true, lastName: true } } },
       },
     },
   });
@@ -58,6 +58,7 @@ export async function getFeed(limit = 40): Promise<FeedPost[]> {
       linkSource: p.linkSource,
       author: {
         id: p.author.id,
+        handle: p.author.handle,
         firstName: p.author.firstName,
         lastName: p.author.lastName,
         avatarSvg: p.author.avatars[0]?.svg ?? null,
@@ -98,6 +99,7 @@ export async function listPeople(opts: { q?: string; onlyAlive?: boolean } = {})
 
   return people.map((p) => ({
     id: p.id,
+    handle: p.handle,
     firstName: p.firstName,
     lastName: p.lastName,
     city: p.city,
@@ -110,10 +112,11 @@ export async function listPeople(opts: { q?: string; onlyAlive?: boolean } = {})
   }));
 }
 
-export async function getPerson(id: string) {
+export async function getPerson(slug: string) {
   const world = await getWorld();
-  const p = await prisma.persona.findUnique({
-    where: { id },
+  // Accept either a handle or a raw id.
+  const p = await prisma.persona.findFirst({
+    where: { OR: [{ handle: slug }, { id: slug }] },
     include: {
       avatars: { orderBy: { simDay: "asc" } },
       posts: {
@@ -126,6 +129,7 @@ export async function getPerson(id: string) {
     },
   });
   if (!p) return null;
+  const id = p.id;
 
   // relationships (both directions)
   const rels = await prisma.relationship.findMany({
@@ -147,6 +151,7 @@ export async function getPerson(id: string) {
       if (!o) return null;
       return {
         id: o.id,
+        handle: o.handle,
         name: `${o.firstName} ${o.lastName}`,
         type: r.type,
         strength: r.strength,
@@ -157,6 +162,7 @@ export async function getPerson(id: string) {
     })
     .filter(Boolean) as {
     id: string;
+    handle: string | null;
     name: string;
     type: string;
     strength: number;
@@ -200,6 +206,7 @@ export async function getPerson(id: string) {
       const shared = safeJson(c.interests).filter((x) => myInterests.has(x));
       return {
         id: c.id,
+        handle: c.handle,
         name: `${c.firstName} ${c.lastName}`,
         occupation: c.occupation,
         city: c.city,
@@ -216,6 +223,7 @@ export async function getPerson(id: string) {
 
   return {
     id: p.id,
+    handle: p.handle,
     firstName: p.firstName,
     lastName: p.lastName,
     pronouns: p.pronouns,

@@ -26,17 +26,20 @@ export function PostCard({ post }: { post: FeedPost }) {
   return (
     <article className="card p-4">
       <div className="flex items-start gap-3">
-        <Link href={`/people/${post.author.id}`}>
+        <Link href={`/people/${post.author.handle ?? post.author.id}`}>
           <Avatar svg={post.author.avatarSvg} photo={post.author.avatarPhoto} size={44} alt={post.author.firstName} />
         </Link>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
             <Link
-              href={`/people/${post.author.id}`}
+              href={`/people/${post.author.handle ?? post.author.id}`}
               className="font-semibold hover:underline underline-offset-2"
             >
               {post.author.firstName} {post.author.lastName}
             </Link>
+            {post.author.handle && (
+              <span className="text-xs text-[var(--muted)]">{`@${post.author.handle}`}</span>
+            )}
             <span className="chip">{KIND_LABEL[post.kind] ?? post.kind}</span>
             <span className="text-xs text-[var(--muted)] ml-auto tabular-nums">
               {simDate(post.simDay)}
@@ -98,7 +101,7 @@ export function PostCard({ post }: { post: FeedPost }) {
               {post.comments.map((c) => (
                 <div key={c.id} className="text-sm">
                   <Link
-                    href={`/people/${c.author.id}`}
+                    href={`/people/${c.author.handle ?? c.author.id}`}
                     className="font-medium hover:underline underline-offset-2"
                   >
                     {c.author.firstName}
