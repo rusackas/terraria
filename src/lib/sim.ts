@@ -5,8 +5,8 @@ import { prisma } from "./db";
 import { RNG } from "./rng";
 import { ageOf, DAYS_PER_YEAR, simDate } from "./time";
 import { generatePersona, faceFor } from "./generate";
-import { makePost, makeComment, makeNewsShare, makeReflection, type PersonaLike } from "./content";
-import { REACTION_TYPES } from "./data";
+import { makePost, makeComment, makeNewsShare, makeReflection, makeLifeEventPost, type PersonaLike } from "./content";
+import { REACTION_TYPES, REGIONS } from "./data";
 import { buildSoul, type SoulInput } from "./soul";
 import { beat, type HeartbeatState, type HeartbeatSignals } from "./heartbeat";
 import { remember } from "./memory";
@@ -417,6 +417,9 @@ export async function tick(): Promise<TickReport> {
   }
 
   // 5) LIFE EVENTS: jobs, moves, partnerships, children, illness, death.
+  // Big moments are collected here and announced to the feed afterward (step 6.75)
+  // so friends can react to them, just like a real social network.
+  const lifePosts: { p: Persona; event: string }[] = [];
   const yearsPerTick = world.daysPerTick / DAYS_PER_YEAR;
   for (const p of alive) {
     const age = ageOf(p.birthDay, day);
@@ -434,11 +437,17 @@ export async function tick(): Promise<TickReport> {
     // Job change.
     if (age >= 18 && age < 67 && rng.chance(0.05 * yearsPerTick + 0.02)) {
       await recordEvent(p, day, "job", `${p.firstName} started a new job.`);
+      lifePosts.push({ p, event: "you started a new job" });
     }
 
-    // Move city.
+    // Move to a real city (spontaneous).
     if (age >= 18 && rng.chance(0.02)) {
-      await recordEvent(p, day, "move", `${p.firstName} moved to a new city.`);
+      const region = rng.weighted(REGIONS.map((r) => [r, r[1]] as const));
+      const city = rng.pick(region[2]);
+      if (city !== p.city) {
+        await relocate(p, city, region[0], day, `${p.firstName} moved to ${city}.`);
+        lifePosts.push({ p, event: `you moved to ${city}` });
+      }
     }
 
     // Partnership + children handled below.
@@ -473,6 +482,16 @@ export async function tick(): Promise<TickReport> {
         partnered.add(b.id);
         events.push(`💞 ${a.firstName} and ${b.firstName} are now partners.`);
         await recordEvent(a, day, "relationship", `${a.firstName} partnered with ${b.firstName}.`);
+        await recordEvent(b, day, "relationship", `${b.firstName} partnered with ${a.firstName}.`);
+        lifePosts.push({ p: a, event: `you and ${b.firstName} are officially together now` });
+        // Co-locate: if they live apart, one partner moves to the other's city.
+        if (a.city !== b.city) {
+          const mover = rng.chance(0.5) ? a : b;
+          const home = mover === a ? b : a;
+          await relocate(mover, home.city, home.country, day,
+            `${mover.firstName} moved to ${home.city} to be with ${home.firstName}.`);
+          lifePosts.push({ p: mover, event: `you moved to ${home.city} to be with your partner ${home.firstName}` });
+        }
       }
       continue;
     }
@@ -493,6 +512,8 @@ export async function tick(): Promise<TickReport> {
       births++;
       events.push(`👶 ${a.firstName} & ${b.firstName} welcomed ${child.firstName}.`);
       await recordEvent(a, day, "child", `${a.firstName} became a parent to ${child.firstName}.`);
+      await recordEvent(b, day, "child", `${b.firstName} became a parent to ${child.firstName}.`);
+      lifePosts.push({ p: a, event: `you and ${b.firstName} just welcomed a baby named ${child.firstName}` });
     }
   }
 
@@ -513,6 +534,21 @@ export async function tick(): Promise<TickReport> {
       invites++;
       events.push(`👋 ${p.firstName} invited ${associate.firstName} ${associate.lastName} (${associate.via}).`);
     }
+  }
+
+  // 6.75) LIFE-EVENT POSTS: announce the big moments (a baby, a move, a new job,
+  //       a partnership) to the feed so friends react to them next tick.
+  const lifeMade = (
+    await Promise.all(
+      lifePosts.map(async (lp) => {
+        const text = await makeLifeEventPost(toPersonaLike(lp.p, day), lp.event);
+        return text ? { p: lp.p, text } : null;
+      }),
+    )
+  ).flatMap((x) => (x ? [x] : []));
+  for (const { p, text } of lifeMade) {
+    await prisma.post.create({ data: { authorId: p.id, simDay: day, kind: "life_event", topic: null, text } });
+    posts++;
   }
 
   // 7) REFLECTION: some personas pause and distill recent experience into an
@@ -687,6 +723,14 @@ async function linkFamily(childId: string, parentId: string, day: number) {
     create: { aId, bId, type: "family", strength: 1, sinceDay: day },
     update: { type: "family", strength: 1 },
   });
+}
+
+/** Move a persona to a new city (updates DB + the in-memory object) and log it. */
+async function relocate(p: Persona, city: string, country: string, day: number, desc: string) {
+  await prisma.persona.update({ where: { id: p.id }, data: { city, country } });
+  p.city = city;
+  p.country = country;
+  await recordEvent(p, day, "move", desc);
 }
 
 async function linkRelationship(a: string, b: string, type: string, strength: number, day: number) {

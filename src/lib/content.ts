@@ -58,6 +58,12 @@ export async function makeNewsShare(
   return generate(prompt, 110);
 }
 
+/** A persona announces a real life event (a baby, a move, a new job, a partnership). */
+export async function makeLifeEventPost(persona: PersonaLike, event: string): Promise<string | null> {
+  const prompt = `You are ${persona.firstName}, a ${persona.age}-year-old ${persona.occupation} in ${persona.city}. Something just happened in your life: ${event}. Write ONE short, natural first-person social-media post sharing this news with friends (max 2 sentences), in your own voice — excited, tender, or wry as fits you. Just the post text.`;
+  return generate(prompt, 110);
+}
+
 // ---- Comments (skill-guided prompt, LLM-written) ------------------------
 
 export async function makeComment(
