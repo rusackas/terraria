@@ -77,11 +77,11 @@ export const INTERESTS = [
 ];
 
 export const TOPICS = [
-  "the weather turning", "a book they just finished", "a new recipe",
+  "the changing weather", "a book I just finished", "a new recipe",
   "weekend plans", "a frustrating commute", "a small personal win",
-  "a documentary they watched", "the state of the world", "a hobby project",
-  "an old friend they miss", "a change at work", "something in the news",
-  "a memory from childhood", "a local event", "an unpopular opinion",
+  "a documentary I watched", "the state of the world", "a hobby project",
+  "an old friend I miss", "a change at work", "something in the news",
+  "a childhood memory", "a local event", "an unpopular opinion",
 ];
 
 export const REACTION_TYPES = ["like", "love", "laugh", "wow", "sad", "angry"] as const;

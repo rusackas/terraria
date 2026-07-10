@@ -103,17 +103,35 @@ async function viaAnthropic(prompt: string, maxTokens: number): Promise<string |
 
 let cliMissing = false; // set once if the `claude` binary isn't found
 
+// `claude -p` is the Claude Code coding agent — by default it reads the repo and
+// will break character ("I'm here to help with software engineering"). Replacing
+// its system prompt and running from a neutral dir turns it into a clean roleplay
+// engine that stays in character.
+const CLI_SYSTEM =
+  "You are a creative-writing engine that voices fictional social-media personas for a simulation. " +
+  "Given a persona and an instruction, reply ONLY with the requested in-character text. " +
+  "No preamble, no surrounding quotation marks, no meta commentary, no offers to help. " +
+  "Keep it very short — one sentence, at most two; never write paragraphs. " +
+  "Never break character or mention being an AI, an assistant, or that this is a task.";
+
+// Signs the model broke character despite the system prompt — discard if so.
+const OFF_CHARACTER = /\b(as an AI|language model|I'?m here to help|software engineering|the (Terraria )?project|uncommitted|how can I (help|assist))\b/i;
+
 async function viaCli(prompt: string): Promise<string | null> {
   if (cliMissing) return null;
   try {
     const { execFile } = await import("node:child_process");
     const { promisify } = await import("node:util");
+    const os = await import("node:os");
     const run = promisify(execFile);
-    const { stdout } = await run("claude", ["-p", prompt, "--model", MODEL], {
-      timeout: 60_000,
-      maxBuffer: 1024 * 1024,
-    });
-    return stripQuotes(stdout) || null;
+    const { stdout } = await run(
+      "claude",
+      ["-p", prompt, "--model", MODEL, "--system-prompt", CLI_SYSTEM, "--exclude-dynamic-system-prompt-sections"],
+      { timeout: 60_000, maxBuffer: 1024 * 1024, cwd: os.tmpdir() },
+    );
+    const text = stripQuotes(stdout);
+    if (!text || OFF_CHARACTER.test(text)) return null;
+    return text;
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
       cliMissing = true;

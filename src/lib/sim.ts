@@ -5,11 +5,11 @@ import { prisma } from "./db";
 import { RNG } from "./rng";
 import { ageOf, DAYS_PER_YEAR, simDate } from "./time";
 import { generatePersona, faceFor } from "./generate";
-import { makePost, makeComment, makeNewsShare, type PersonaLike } from "./content";
+import { makePost, makeComment, makeNewsShare, makeReflection, type PersonaLike } from "./content";
 import { REACTION_TYPES } from "./data";
 import { buildSoul, type SoulInput } from "./soul";
 import { beat, type HeartbeatState, type HeartbeatSignals } from "./heartbeat";
-import { remember, distillInsight, type ReflectionSignals } from "./memory";
+import { remember } from "./memory";
 import { getNewsForTopic, markShared } from "./news";
 import { resetLlmBudget } from "./llm";
 import type { Persona } from "@prisma/client";
@@ -189,6 +189,7 @@ export async function tick(): Promise<TickReport> {
     news: { topic: string; id: string; title: string; url: string; source: string | null } | null;
   }
   const postTasks: PostTask[] = [];
+  let newsPlanned = 0; // caps news fetches/shares this tick (actual count is newsShared)
   for (const p of alive) {
     const age = ageOf(p.birthDay, day);
     if (age < 8) continue; // little ones don't post
@@ -200,7 +201,7 @@ export async function tick(): Promise<TickReport> {
     const topicChoice = p.focus || (like.interests.length ? rng.pick(like.interests) : "");
     const wantsNews =
       topicChoice &&
-      newsShared < NEWS_POSTS_PER_TICK &&
+      newsPlanned < NEWS_POSTS_PER_TICK &&
       rng.chance(0.22 + p.openness * 0.25);
     let news: PostTask["news"] = null;
     if (wantsNews) {
@@ -208,7 +209,7 @@ export async function tick(): Promise<TickReport> {
       if (items.length) {
         const item = new RNG(`${world.seed}:news:${p.id}:${tickNo}`).pick(items);
         news = { topic: topicChoice, id: item.id, title: item.title, url: item.url, source: item.source };
-        newsShared++;
+        newsPlanned++;
       }
     }
 
@@ -223,20 +224,18 @@ export async function tick(): Promise<TickReport> {
     postTasks.push({ p, like, kind, mood: p.mood, focus: p.focus, rememberIt, news });
   }
 
-  const generatedPosts = await Promise.all(
-    postTasks.map(async (t) => {
-      if (t.news) {
-        const text = await makeNewsShare(
-          `${world.seed}:newsshare:${t.p.id}:${tickNo}`, t.like, t.news.title, t.news.topic,
-        );
-        return { t, text, topic: t.news.topic };
-      }
-      const { text, topic } = await makePost(
-        `${world.seed}:post:${t.p.id}:${tickNo}`, t.like, t.kind, { mood: t.mood, focus: t.focus },
-      );
-      return { t, text, topic };
-    }),
-  );
+  const generatedPosts = (
+    await Promise.all(
+      postTasks.map(async (t) => {
+        if (t.news) {
+          const text = await makeNewsShare(t.like, t.news.title, t.news.topic);
+          return text ? { t, text, topic: t.news.topic } : null;
+        }
+        const made = await makePost(t.like, t.kind, { mood: t.mood, focus: t.focus });
+        return made ? { t, text: made.text, topic: made.topic } : null;
+      }),
+    )
+  ).flatMap((g) => (g ? [g] : []));
 
   for (const g of generatedPosts) {
     const { t } = g;
@@ -249,6 +248,7 @@ export async function tick(): Promise<TickReport> {
       });
       await markShared(t.news.id);
       await remember(t.p.id, day, "fact", `Read and shared news about ${t.news.topic}: "${trim(t.news.title)}"`, 0.9);
+      newsShared++;
     } else {
       await prisma.post.create({
         data: { authorId: t.p.id, simDay: day, kind: t.kind, topic: g.topic, text: g.text },
@@ -372,17 +372,18 @@ export async function tick(): Promise<TickReport> {
   }
 
   // Generate all comment text in parallel (bounded concurrency), then persist.
-  const madeComments = await Promise.all(
-    commentTasks.map(async (t) => {
-      const { text } = await makeComment(
-        `${world.seed}:cmt:${t.postId}:${t.viewerId}`,
-        t.viewerLike,
-        { kind: t.kind, text: t.text, topic: t.topic, headline: t.headline, authorMood: t.authorMood },
-        t.authorName,
-      );
-      return { t, text };
-    }),
-  );
+  const madeComments = (
+    await Promise.all(
+      commentTasks.map(async (t) => {
+        const text = await makeComment(
+          t.viewerLike,
+          { kind: t.kind, text: t.text, topic: t.topic, headline: t.headline, authorMood: t.authorMood },
+          t.authorName,
+        );
+        return text ? { t, text } : null;
+      }),
+    )
+  ).flatMap((m) => (m ? [m] : []));
   for (const { t, text } of madeComments) {
     await prisma.comment.create({
       data: { postId: t.postId, authorId: t.viewerId, text, simDay: day },
@@ -500,36 +501,52 @@ export async function tick(): Promise<TickReport> {
     select: { id: true },
   });
   const aliveIds = new Set(stillAlive.map((p) => p.id));
+
+  // Phase 1: decide who reflects + gather context (sequential RNG + reads).
+  interface ReflTask { p: Persona; recentMemories: string[] }
+  const reflTasks: ReflTask[] = [];
   for (const p of alive) {
     if (!aliveIds.has(p.id)) continue; // died this tick
     const reflectRng = new RNG(`${world.seed}:refl:${p.id}:${tickNo}`);
     if (!reflectRng.chance(0.12 + p.openness * 0.12)) continue;
 
-    const ev = evByPersona.get(p.id) ?? new Set<string>();
-    const engagement = (rxByAuthor.get(p.id) ?? 0) + (cmByAuthor.get(p.id) ?? 0);
-    const sig: ReflectionSignals = {
-      recentLoss: ev.has("loss"),
-      recentLove: ev.has("relationship"),
-      recentPositiveEvent: ev.has("job") || ev.has("child") || ev.has("milestone"),
-      wellReceived: engagement >= 5,
-      ignored: engagement === 0 && postedPrev.has(p.id),
-      topInterest: p.focus || interestsOf(p)[0] || null,
-      mood: p.mood,
-      agreeableness: p.agreeableness,
-      openness: p.openness,
-    };
-    const insight = distillInsight(sig, reflectRng);
-    await remember(p.id, day, "reflection", insight, 1.6);
+    const mems = await prisma.memory.findMany({
+      where: { personaId: p.id, kind: { in: ["event", "post", "relationship"] } },
+      orderBy: [{ simDay: "desc" }],
+      take: 6,
+    });
+    reflTasks.push({ p, recentMemories: mems.map((m) => m.content) });
+  }
 
+  // Phase 2: write each insight with the LLM in parallel (skip if none produced).
+  const reflected = (
+    await Promise.all(
+      reflTasks.map(async (t) => {
+        const insight = await makeReflection({
+          firstName: t.p.firstName,
+          occupation: t.p.occupation,
+          city: t.p.city,
+          age: ageOf(t.p.birthDay, day),
+          mood: t.p.mood,
+          recentMemories: t.recentMemories,
+        });
+        return insight ? { t, insight } : null;
+      }),
+    )
+  ).flatMap((r) => (r ? [r] : []));
+
+  // Phase 3: persist the insight + rebuild the soul (sequential).
+  for (const { t, insight } of reflected) {
+    await remember(t.p.id, day, "reflection", insight, 1.6);
     const insights = (
       await prisma.memory.findMany({
-        where: { personaId: p.id, kind: "reflection" },
+        where: { personaId: t.p.id, kind: "reflection" },
         orderBy: [{ simDay: "desc" }],
         take: 6,
       })
     ).map((m) => m.content);
-    const soul = buildSoul(soulInputFor(p, day, insights));
-    await prisma.persona.update({ where: { id: p.id }, data: { soul, soulDay: day } });
+    const soul = buildSoul(soulInputFor(t.p, day, insights));
+    await prisma.persona.update({ where: { id: t.p.id }, data: { soul, soulDay: day } });
     reflections++;
   }
 
