@@ -5,7 +5,7 @@
 // demographics, bio, seed soul) is procedural — see generate.ts / soul.ts.
 
 import { moodTone } from "./heartbeat";
-import { generate } from "./llm";
+import { generate, generateSeed } from "./llm";
 import { extractSubject, skillInstruction, type CommentContext } from "./skills";
 
 export interface PersonaLike {
@@ -23,6 +23,27 @@ export interface PersonaLike {
 export interface Heartbeat {
   mood: string;
   focus: string;
+}
+
+// ---- Seed profile (one-time, uses the stronger seed backend) ------------
+
+/** Write a persona's initial "about me" bio when they come into existence. */
+export async function makeBio(p: {
+  firstName: string;
+  lastName: string;
+  age: number;
+  pronouns: string;
+  occupation: string;
+  city: string;
+  country: string;
+  interests: string[];
+}): Promise<string | null> {
+  const who =
+    p.age < 13
+      ? `a ${p.age}-year-old kid`
+      : `a ${p.age}-year-old ${p.occupation}`;
+  const prompt = `Invent a short social-media "about me" bio for a fictional person coming onto a social network: ${p.firstName} ${p.lastName}, ${who} in ${p.city}, ${p.country} (${p.pronouns}), into ${p.interests.slice(0, 4).join(", ")}. Write it in first person, 2–3 sentences, warm and specific with a hint of real personality and voice — like an actual person's profile bio, not a résumé or a list. Don't restate their name. Just the bio.`;
+  return generateSeed(prompt, 160);
 }
 
 // ---- Posts --------------------------------------------------------------

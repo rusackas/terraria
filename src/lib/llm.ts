@@ -242,15 +242,42 @@ export async function ensureOllamaReady(): Promise<{ ok: boolean; note?: string 
   return { ok: true };
 }
 
+function dispatch(b: Backend, prompt: string, maxTokens: number): Promise<string | null> {
+  if (b === "ollama") return viaOllama(prompt, maxTokens);
+  if (b === "cli") return viaCli(prompt);
+  if (b === "anthropic") return viaAnthropic(prompt, maxTokens);
+  return Promise.resolve(null);
+}
+
 /** Generate text. Returns null when no backend is available, the per-tick budget
  *  is exhausted, or the call fails (callers then skip the content). */
 export async function generate(prompt: string, maxTokens = 120): Promise<string | null> {
   const b = backend();
   if (b === "off" || overBudget()) return null;
   used++;
-  return withSlot(() => {
-    if (b === "ollama") return viaOllama(prompt, maxTokens);
-    if (b === "cli") return viaCli(prompt);
-    return viaAnthropic(prompt, maxTokens);
-  });
+  return withSlot(() => dispatch(b, prompt, maxTokens));
+}
+
+// A persona's one-time "coming into existence" (bio/soul) can use a stronger model
+// than the high-volume ongoing activity — set TERRARIA_SEED_LLM. Defaults to
+// `claude-cli` (claude -p): better writing for the seed, while ticks stay on Ollama.
+function seedBackend(): Backend {
+  const mode = process.env.TERRARIA_SEED_LLM?.toLowerCase();
+  if (mode === "off") return "off";
+  if (mode === "ollama") return "ollama";
+  if (mode === "anthropic") return "anthropic";
+  if (mode === "cli" || mode === "claude-cli") return "cli";
+  return "cli";
+}
+
+/** Generate one-time seed-profile content. Tries the seed backend (claude -p by
+ *  default) and falls back to the regular activity backend if it's unavailable. */
+export async function generateSeed(prompt: string, maxTokens = 160): Promise<string | null> {
+  const b = seedBackend();
+  if (b !== "off") {
+    used++;
+    const out = await withSlot(() => dispatch(b, prompt, maxTokens));
+    if (out) return out;
+  }
+  return generate(prompt, maxTokens);
 }

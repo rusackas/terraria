@@ -5,7 +5,7 @@ import { prisma } from "./db";
 import { RNG } from "./rng";
 import { ageOf, DAYS_PER_YEAR, simDate } from "./time";
 import { generatePersona, faceFor } from "./generate";
-import { makePost, makeComment, makeNewsShare, makeReflection, makeLifeEventPost, type PersonaLike } from "./content";
+import { makePost, makeComment, makeNewsShare, makeReflection, makeLifeEventPost, makeBio, type PersonaLike } from "./content";
 import { REACTION_TYPES, REGIONS } from "./data";
 import { buildSoul, type SoulInput } from "./soul";
 import { beat, type HeartbeatState, type HeartbeatSignals } from "./heartbeat";
@@ -802,6 +802,19 @@ async function inviteAssociate(inviter: Persona, day: number, rng: RNG) {
 
 export async function createPersona(gen: ReturnType<typeof generatePersona>, day: number) {
   const age = ageOf(gen.birthDay, day);
+  // A new person writes their own bio (via the stronger seed backend, claude -p by
+  // default); fall back to the procedural bio if unavailable.
+  const llmBio = await makeBio({
+    firstName: gen.firstName,
+    lastName: gen.lastName,
+    age,
+    pronouns: gen.pronouns,
+    occupation: gen.occupation,
+    city: gen.city,
+    country: gen.country,
+    interests: gen.interests,
+  });
+  if (llmBio) gen.bio = llmBio;
   const soul = buildSoul({
     firstName: gen.firstName,
     lastName: gen.lastName,

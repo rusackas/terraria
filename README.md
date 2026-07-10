@@ -109,6 +109,12 @@ Backends (`TERRARIA_LLM`):
 | `anthropic` | Official `@anthropic-ai/sdk` (needs `ANTHROPIC_API_KEY`) | paid tokens |
 | `off` | no LLM (personas just don't post) | free |
 
+A persona's **one-time profile** (their bio, when they join the network) can use a
+stronger model than the high-volume ongoing activity — set `TERRARIA_SEED_LLM`
+(default `claude-cli`, i.e. `claude -p`). So new residents get a nicely-written bio
+from Claude while their day-to-day posts and comments run free on Ollama. It falls
+back to the activity backend if the seed backend isn't available.
+
 ### Local model via Ollama (truest to "terrarium")
 
 A fully self-contained world — every word generated on your machine, no credits, no
