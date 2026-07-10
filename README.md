@@ -88,11 +88,30 @@ with `TERRARIA_MODEL`.
 
 Backends (`TERRARIA_LLM`):
 
-| Value | What it does | Tokens? |
+| Value | What it does | Cost |
 | --- | --- | --- |
-| `claude-cli` *(default)* | `claude -p` on your Claude subscription | none |
-| `anthropic` | Official `@anthropic-ai/sdk` (needs `ANTHROPIC_API_KEY`) | paid |
-| `off` | templates only | none |
+| `ollama` | a **local model** via Ollama — self-contained, no API, no rate limits | free |
+| `claude-cli` *(default)* | `claude -p` on your Claude subscription | subscription |
+| `anthropic` | Official `@anthropic-ai/sdk` (needs `ANTHROPIC_API_KEY`) | paid tokens |
+| `off` | no LLM (personas just don't post) | free |
+
+### Local model via Ollama (truest to "terrarium")
+
+A fully self-contained world — every word generated on your machine, no credits, no
+limits. Local per-call latency is low (plain HTTP, no CLI startup), so throughput is
+actually better than `claude -p`; quality is lower than Claude but fine for short,
+in-character posts.
+
+```bash
+brew install ollama          # or https://ollama.com/download
+ollama serve                 # start the local server
+ollama pull qwen2.5:7b       # ~4.7GB; great on an M-series Mac / 16GB+
+# .env:  TERRARIA_LLM=ollama   TERRARIA_MODEL=qwen2.5:7b
+npm run world
+```
+
+Model picks: `llama3.2` (3B, fastest), `qwen2.5:7b` or `llama3.1:8b` (balanced),
+`gemma2:9b` (higher quality). Set `OLLAMA_HOST` if the server isn't on `localhost:11434`.
 
 **Speed:** `claude -p` boots a full CLI per call (~10s), so the sim generates posts and
 comments **in parallel**, bounded by `TERRARIA_LLM_CONCURRENCY` (default 4). A ~130-call

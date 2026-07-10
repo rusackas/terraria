@@ -1,32 +1,33 @@
-// LLM backend for persona content. Three backends, auto-selected:
+// LLM backend for persona content. Backends, selected via TERRARIA_LLM:
 //
-//   1. "anthropic" — the official Anthropic SDK (@anthropic-ai/sdk). Fast,
-//      retryable, works locally AND on Vercel. Used automatically when an
-//      Anthropic key is present. This is the right engine for the sim, which
-//      makes many short calls per tick.
-//   2. "cli" — shells out to `claude -p`. Uses your existing Claude Code login
-//      (no API key needed), but spawns a process per call, so it's slow at
-//      volume and unavailable in serverless. Opt in with TERRARIA_LLM=claude-cli
-//      for local runs.
-//   3. "off" — no LLM; callers fall back to templated content.
+//   1. "ollama" — a local model via Ollama (http://localhost:11434). Fully
+//      self-contained: no API, no credits, no rate limits. The truest fit for a
+//      "terrarium." Fast per call (plain HTTP, no process startup). Model quality
+//      is lower than Claude but fine for short in-character posts/comments.
+//   2. "cli" — shells out to `claude -p` (Claude Code login/subscription, no API
+//      tokens). Real Claude quality, but spawns a process per call (~10s startup).
+//   3. "anthropic" — the official Anthropic SDK. Fast, but bills API tokens.
+//   4. "off" — no LLM; callers skip the content (no templated filler).
 //
 // No AI Gateway key is required for any of these.
 
-type Backend = "anthropic" | "cli" | "off";
+type Backend = "ollama" | "anthropic" | "cli" | "off";
 
-// Haiku 4.5 — fast and cheap, the right fit for a terrarium generating hundreds
-// of short posts/comments per tick. Override with TERRARIA_MODEL for a beefier
-// model (e.g. claude-opus-4-8) if you want richer writing.
-const MODEL = process.env.TERRARIA_MODEL || "claude-haiku-4-5";
+// Model per backend. TERRARIA_MODEL overrides either (use a name valid for your
+// chosen backend, e.g. "claude-haiku-4-5" for Claude, "qwen2.5:7b" for Ollama).
+const MODEL = process.env.TERRARIA_MODEL || "claude-haiku-4-5"; // claude backends
+const OLLAMA_MODEL = process.env.TERRARIA_MODEL || "llama3.2"; // ollama backend
+const OLLAMA_HOST = process.env.OLLAMA_HOST || "http://localhost:11434";
 
 export function backend(): Backend {
   const mode = process.env.TERRARIA_LLM?.toLowerCase();
   if (mode === "off") return "off";
+  if (mode === "ollama") return "ollama";
   if (mode === "anthropic") return "anthropic";
   if (mode === "cli" || mode === "claude-cli") return "cli";
-  // Default: `claude -p` — real AI content on your Claude subscription, no API
-  // tokens. We never silently use the paid API just because a key is present;
-  // set TERRARIA_LLM=anthropic to opt into that. Templates are error-only fallback.
+  // Default: `claude -p` — real Claude on your subscription, no API tokens. We
+  // never silently use the paid API just because a key is present; set
+  // TERRARIA_LLM=anthropic for that, or TERRARIA_LLM=ollama for a local model.
   return "cli";
 }
 
@@ -145,11 +146,56 @@ async function viaCli(prompt: string): Promise<string | null> {
   }
 }
 
+let ollamaWarned = false;
+
+async function viaOllama(prompt: string, maxTokens: number): Promise<string | null> {
+  try {
+    const res = await fetch(`${OLLAMA_HOST}/api/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: OLLAMA_MODEL,
+        prompt,
+        system: CLI_SYSTEM, // same roleplay framing keeps the local model in character
+        stream: false,
+        options: { num_predict: maxTokens, temperature: 0.9 },
+      }),
+      signal: AbortSignal.timeout(120_000),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      if (res.status === 404 && !ollamaWarned) {
+        ollamaWarned = true;
+        console.warn(`[terraria] Ollama has no model "${OLLAMA_MODEL}". Run: ollama pull ${OLLAMA_MODEL}`);
+      }
+      void body;
+      return null;
+    }
+    const data = (await res.json()) as { response?: string };
+    const text = stripQuotes(data.response ?? "");
+    if (!text || OFF_CHARACTER.test(text)) return null;
+    return text;
+  } catch (err) {
+    const e = err as NodeJS.ErrnoException;
+    if (!ollamaWarned && (e.code === "ECONNREFUSED" || e.message?.includes("fetch failed"))) {
+      ollamaWarned = true;
+      console.warn(`[terraria] Ollama not reachable at ${OLLAMA_HOST}. Is it running? (\`ollama serve\`)`);
+    } else if (e.name !== "AbortError") {
+      console.warn("[terraria] Ollama call failed:", e.message);
+    }
+    return null;
+  }
+}
+
 /** Generate text. Returns null when no backend is available, the per-tick budget
- *  is exhausted, or the call fails (callers then use templated content). */
+ *  is exhausted, or the call fails (callers then skip the content). */
 export async function generate(prompt: string, maxTokens = 120): Promise<string | null> {
   const b = backend();
   if (b === "off" || overBudget()) return null;
   used++;
-  return withSlot(() => (b === "cli" ? viaCli(prompt) : viaAnthropic(prompt, maxTokens)));
+  return withSlot(() => {
+    if (b === "ollama") return viaOllama(prompt, maxTokens);
+    if (b === "cli") return viaCli(prompt);
+    return viaAnthropic(prompt, maxTokens);
+  });
 }
