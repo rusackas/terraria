@@ -8,16 +8,29 @@
 //      pulled on first generate.
 //   2. "a1111" — a local image server speaking the Automatic1111 HTTP API
 //      (Draw Things, A1111, ComfyUI-with-shim, Forge) at TERRARIA_IMAGE_HOST.
-//   3. "off"   — no image generation; callers keep the procedural SVG avatar.
+//   3. "sdcpp" — stable-diffusion.cpp (MIT, tiny C++/Metal engine), driven by its
+//      `sd` CLI. Lightweight and RAM-friendly (runs a ~2 GB SD1.5 checkpoint in a
+//      few GB), so it's the best fit for machines with ≤16–24 GB RAM where the
+//      larger mflux/FLUX models swap-thrash. Build the binary from
+//      github.com/leejet/stable-diffusion.cpp and point TERRARIA_SDCPP_BIN /
+//      TERRARIA_SDCPP_MODEL (and optionally TERRARIA_SDCPP_VAE) at it.
+//   4. "off"   — no image generation; callers keep the procedural SVG avatar.
 //
 // generateFace() returns a base64 PNG (no data-URI prefix), or null on any
 // failure (callers then fall back to the procedural SVG).
 
-type ImageBackend = "mflux" | "a1111" | "off";
+type ImageBackend = "mflux" | "a1111" | "sdcpp" | "off";
 
 const HOST = process.env.TERRARIA_IMAGE_HOST || "http://localhost:7860";
 const SIZE = parseInt(process.env.TERRARIA_IMAGE_SIZE || "512", 10);
 const CFG = parseFloat(process.env.TERRARIA_IMAGE_CFG || "6");
+
+// stable-diffusion.cpp config. Point these at your built binary + downloaded
+// checkpoint; the VAE is optional (needed for "noVAE" checkpoints like
+// Realistic Vision, unnecessary for checkpoints with a baked VAE like SD1.5 base).
+const SDCPP_BIN = process.env.TERRARIA_SDCPP_BIN || "sd";
+const SDCPP_MODEL = process.env.TERRARIA_SDCPP_MODEL || "";
+const SDCPP_VAE = process.env.TERRARIA_SDCPP_VAE || "";
 
 // mflux config. Default model: FLUX.1 schnell — small, Apache-2.0, distilled for
 // a handful of steps, great for headshots. schnell/dev use the base
@@ -36,6 +49,7 @@ export function imageBackend(): ImageBackend {
   const mode = process.env.TERRARIA_IMAGE?.toLowerCase();
   if (mode === "off") return "off";
   if (mode === "a1111") return "a1111";
+  if (mode === "sdcpp") return "sdcpp";
   if (mode === "mflux") return "mflux";
   // Default: mflux — open-source, permissive (MIT), no App Store, no server.
   return "mflux";
@@ -149,6 +163,58 @@ async function viaMflux(seed: string, d: FaceDemographics): Promise<string | nul
   }
 }
 
+// ── stable-diffusion.cpp CLI backend ────────────────────────────────────────
+
+let sdcppMissing = false; // set once if the sd binary isn't found
+
+async function viaSdcpp(seed: string, d: FaceDemographics): Promise<string | null> {
+  if (sdcppMissing) return null;
+  const os = await import("node:os");
+  const path = await import("node:path");
+  const { randomUUID } = await import("node:crypto");
+  const { readFile, unlink } = await import("node:fs/promises");
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const run = promisify(execFile);
+
+  const out = path.join(os.tmpdir(), `terraria-face-${randomUUID()}.png`);
+  const args = [
+    "-M", "img_gen",
+    "-m", SDCPP_MODEL,
+    "-p", buildFacePrompt(d),
+    "-n", NEGATIVE,
+    "--steps", String(steps(22)),
+    "--cfg-scale", String(CFG),
+    "-W", String(SIZE),
+    "-H", String(SIZE),
+    "-s", String(seedInt(seed)),
+    "--sampling-method", "dpm++2m",
+    "--scheduler", "karras",
+    "-o", out,
+  ];
+  if (SDCPP_VAE) args.push("--vae", SDCPP_VAE);
+  try {
+    await run(SDCPP_BIN, args, { timeout: 300_000, maxBuffer: 32 * 1024 * 1024 });
+    const buf = await readFile(out);
+    return buf.toString("base64");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      sdcppMissing = true;
+      console.warn(
+        `[terraria] stable-diffusion.cpp binary not found at \`${SDCPP_BIN}\`. Build it ` +
+          `(github.com/leejet/stable-diffusion.cpp) and set TERRARIA_SDCPP_BIN to the \`sd\` ` +
+          `binary and TERRARIA_SDCPP_MODEL to a checkpoint. Set TERRARIA_IMAGE=off to skip ` +
+          `photos. Keeping procedural avatars for now.`,
+      );
+    } else {
+      console.warn("[terraria] sdcpp generation failed, keeping procedural avatar:", (err as Error).message);
+    }
+    return null;
+  } finally {
+    await unlink(out).catch(() => {});
+  }
+}
+
 // ── Automatic1111 HTTP backend ──────────────────────────────────────────────
 
 async function viaA1111(seed: string, d: FaceDemographics): Promise<string | null> {
@@ -182,6 +248,7 @@ export async function generateFace(seed: string, d: FaceDemographics): Promise<s
   const b = imageBackend();
   if (b === "off") return null;
   if (b === "a1111") return viaA1111(seed, d);
+  if (b === "sdcpp") return viaSdcpp(seed, d);
   return viaMflux(seed, d);
 }
 
@@ -206,6 +273,43 @@ export async function imageReady(): Promise<{ ok: boolean; note?: string }> {
       };
     }
   }
+  if (b === "sdcpp") {
+    const { access } = await import("node:fs/promises");
+    try {
+      await access(SDCPP_BIN);
+    } catch {
+      return {
+        ok: false,
+        note:
+          `stable-diffusion.cpp binary not found at \`${SDCPP_BIN}\` (TERRARIA_SDCPP_BIN). Build it ` +
+          `from github.com/leejet/stable-diffusion.cpp (\`cmake -B build -DSD_METAL=ON && cmake ` +
+          `--build build\`) and point TERRARIA_SDCPP_BIN at the resulting \`sd\` binary.`,
+      };
+    }
+    if (!SDCPP_MODEL) {
+      return { ok: false, note: "TERRARIA_SDCPP_MODEL is unset. Point it at a .safetensors SD checkpoint." };
+    }
+    try {
+      await access(SDCPP_MODEL);
+    } catch {
+      return {
+        ok: false,
+        note: `sdcpp checkpoint not found at \`${SDCPP_MODEL}\` (TERRARIA_SDCPP_MODEL). Download an ungated SD1.5 .safetensors checkpoint.`,
+      };
+    }
+    if (SDCPP_VAE) {
+      try {
+        await access(SDCPP_VAE);
+      } catch {
+        return {
+          ok: false,
+          note: `sdcpp VAE not found at \`${SDCPP_VAE}\` (TERRARIA_SDCPP_VAE). Unset it for baked-VAE checkpoints, or fix the path.`,
+        };
+      }
+    }
+    return { ok: true };
+  }
+
   // mflux: check the CLI is on PATH.
   const cmd = mfluxCommand(MODEL);
   try {

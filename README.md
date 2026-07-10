@@ -136,7 +136,14 @@ each persona's demographics with a pluggable image backend, selected via
 - **`mflux`** (default) — [mflux](https://github.com/filipstrand/mflux) is
   open-source (MIT) and MLX-native for Apple Silicon: it runs FLUX / Z-Image
   locally, no App Store and no HTTP server to babysit. It's CLI-driven, and
-  `npm run setup` provisions it automatically.
+  `npm run setup` provisions it automatically. FLUX/Z-Image weights are large
+  (12–20 GB), so on ≤24 GB machines they can swap-thrash — prefer `sdcpp` there.
+- **`sdcpp`** — [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp),
+  a tiny MIT C++/Metal engine. Lightweight and RAM-friendly (a ~2 GB SD1.5
+  checkpoint runs in a few GB), so it's the best fit for machines with **≤16–24 GB
+  RAM**. Build the `sd` binary, download an ungated realistic SD1.5 checkpoint, and
+  point `TERRARIA_SDCPP_BIN` / `TERRARIA_SDCPP_MODEL` (and optionally
+  `TERRARIA_SDCPP_VAE`) at them.
 - **`a1111`** — a local server speaking the Automatic1111 HTTP API (Draw Things,
   ComfyUI-with-shim, Forge) at `TERRARIA_IMAGE_HOST` (default
   `http://localhost:7860`).
@@ -149,13 +156,23 @@ npm run faces            # generate photos for everyone missing one (first run
                          # downloads the model weights)
 npm run faces -- --all   # regenerate all current portraits
 
+# Lightweight (sdcpp): build stable-diffusion.cpp + grab an SD1.5 checkpoint —
+brew install cmake
+git clone --recursive https://github.com/leejet/stable-diffusion.cpp
+cmake -B build -DSD_METAL=ON -DCMAKE_BUILD_TYPE=Release   # in that repo
+cmake --build build --config Release -j                   # -> build/bin/sd
+# then set TERRARIA_IMAGE=sdcpp, TERRARIA_SDCPP_BIN, TERRARIA_SDCPP_MODEL
+# (and TERRARIA_SDCPP_VAE for "noVAE" checkpoints), then `npm run faces`.
+
 # Alternative (a1111): TERRARIA_IMAGE=a1111 with Draw Things (enable its HTTP API
 # on port 7860) or another A1111-compatible server, then `npm run faces`.
 ```
 
 Tuning env vars: `TERRARIA_IMAGE_MODEL` (default `schnell`; also `dev`,
 `z-image-turbo`, `qwen-image`), `TERRARIA_IMAGE_QUANTIZE` (default `8`),
-`TERRARIA_IMAGE_STEPS`, `TERRARIA_IMAGE_SIZE`, and `TERRARIA_IMAGE_HOST` (a1111).
+`TERRARIA_IMAGE_STEPS`, `TERRARIA_IMAGE_SIZE`, `TERRARIA_IMAGE_CFG`,
+`TERRARIA_IMAGE_HOST` (a1111), and for `sdcpp` the `TERRARIA_SDCPP_BIN` /
+`TERRARIA_SDCPP_MODEL` / `TERRARIA_SDCPP_VAE` paths.
 
 Aging never deletes old pics — a new photo becomes the current profile picture,
 posts an "updated their profile picture" update to the feed (friends react), and
