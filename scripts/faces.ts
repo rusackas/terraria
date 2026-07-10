@@ -11,7 +11,7 @@ import "dotenv/config";
 import { writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { prisma } from "../src/lib/db";
-import { generateFace, imageServerUp, IMAGE_HOST } from "../src/lib/face";
+import { generateFace, imageReady, imageBackend } from "../src/lib/face";
 import { ageOf } from "../src/lib/time";
 
 const OUT = join(process.cwd(), "public", "faces");
@@ -19,12 +19,9 @@ const OUT = join(process.cwd(), "public", "faces");
 async function main() {
   const all = process.argv.includes("--all");
 
-  if (!(await imageServerUp())) {
-    console.error(
-      `⚠️  No image server reachable at ${IMAGE_HOST}.\n` +
-        `   Start Draw Things, turn on its API server (Settings → enable the HTTP\n` +
-        `   server on port 7860), and select a photorealistic model. Then re-run.`,
-    );
+  const ready = await imageReady();
+  if (!ready.ok) {
+    console.error(`⚠️  ${ready.note}`);
     process.exit(1);
   }
 
@@ -38,7 +35,7 @@ async function main() {
     orderBy: { simDay: "asc" },
   });
 
-  console.log(`🎨 Generating ${avatars.length} portrait${avatars.length === 1 ? "" : "s"} via ${IMAGE_HOST}…`);
+  console.log(`🎨 Generating ${avatars.length} portrait${avatars.length === 1 ? "" : "s"} via ${imageBackend()}…`);
   let done = 0, failed = 0, posted = 0;
 
   for (const av of avatars) {

@@ -57,8 +57,44 @@ async function main() {
     process.exit(1);
   }
 
+  // Optional: provision mflux for photorealistic profile pictures. Faces are
+  // optional, so this is entirely non-fatal — warn and continue on any problem.
+  await maybeInstallMflux();
+
   console.log(`\n✅ Ready — backend: ollama, model: ${model}.`);
   console.log("Next:  npm run seed -- 15   then   npm run world");
+}
+
+async function maybeInstallMflux() {
+  const image = process.env.TERRARIA_IMAGE?.toLowerCase();
+  // Default backend is mflux, so provision it when TERRARIA_IMAGE is mflux or unset.
+  if (image && image !== "mflux") return;
+
+  if ((await has("mflux-generate")) || (await has("mflux"))) {
+    console.log("\n✓ mflux is installed (photorealistic profile pictures available).");
+    return;
+  }
+
+  console.log("\n📷 Installing mflux (optional — for photorealistic profile pictures)…");
+  try {
+    if (await has("uv")) {
+      await spawnInherit("uv", ["tool", "install", "mflux"]);
+    } else if (await has("pip3")) {
+      await spawnInherit("pip3", ["install", "mflux"]);
+    } else {
+      console.warn(
+        "  ⚠️  Neither `uv` nor `pip3` found — skipping mflux. Faces are optional; install\n" +
+          "     later with `uv tool install mflux` (or `pip install mflux`) to enable `npm run faces`.",
+      );
+      return;
+    }
+    console.log("  ✓ mflux installed. Models download on first `npm run faces`.");
+  } catch (e) {
+    console.warn(
+      `  ⚠️  Couldn't install mflux (${(e as Error).message}). Faces are optional — install it\n` +
+        "     later with `uv tool install mflux`, or set TERRARIA_IMAGE=off / =a1111.",
+    );
+  }
 }
 
 main().catch((e) => {

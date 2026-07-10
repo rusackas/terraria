@@ -51,12 +51,12 @@ of ticks instead.
 | Concept | Where |
 | --- | --- |
 | **Procedural people** — names, demographics, jobs, Big-Five traits, interests, bios | `src/lib/generate.ts`, `src/lib/data.ts` |
-| **Faces** — deterministic SVG portraits that age; optional photorealistic photos from a local image model (Draw Things / A1111) | `src/lib/avatar.ts`, `src/lib/face.ts` |
+| **Faces** — deterministic SVG portraits that age; optional photorealistic photos from a local image model (mflux by default, or Automatic1111 / Draw Things) | `src/lib/avatar.ts`, `src/lib/face.ts` |
 | **Agents (soul / memory / heartbeat)** — an evolving identity, a growing memory stream, and a per-tick inner state | `src/lib/soul.ts`, `src/lib/memory.ts`, `src/lib/heartbeat.ts` |
 | **Comment skills** — composable behaviors (celebrate, empathize, relate-on-topic, discuss-news, ask, agree/disagree, banter) that respond to the actual post | `src/lib/skills.ts` |
 | **Real news** — personas fetch headlines on their interests via public RSS and share them | `src/lib/news.ts` |
 | **The clock** — one `tick()` beats every heart, ages everyone, generates activity, grows the graph, rolls life events, births & deaths, and reflects | `src/lib/sim.ts` |
-| **Content** — templated by default, LLM-enhanced via the Anthropic SDK or `claude -p` when configured | `src/lib/content.ts`, `src/lib/llm.ts` |
+| **Content** — every post, comment, and reflection written by a local model (Ollama by default; `claude -p` or the Anthropic API optional) | `src/lib/content.ts`, `src/lib/llm.ts` |
 | **The window** — feed, resident directory, and rich profiles (soul, heartbeat, memory) | `src/app/**` |
 
 Everything is derived from a **seed**, so a given world is fully reproducible.
@@ -129,16 +129,33 @@ Model picks: `llama3.2` (3B, fastest), `qwen2.5:7b` or `llama3.1:8b` (balanced),
 
 ### Photorealistic profile pictures (optional)
 
-Personas ship with procedural SVG faces. For real portraits, run a local image
-model that speaks the Automatic1111 API and generate photos from each persona's
-demographics:
+Personas ship with procedural SVG faces. For real portraits, generate photos from
+each persona's demographics with a pluggable image backend, selected via
+`TERRARIA_IMAGE`:
+
+- **`mflux`** (default) — [mflux](https://github.com/filipstrand/mflux) is
+  open-source (MIT) and MLX-native for Apple Silicon: it runs FLUX / Z-Image
+  locally, no App Store and no HTTP server to babysit. It's CLI-driven, and
+  `npm run setup` provisions it automatically.
+- **`a1111`** — a local server speaking the Automatic1111 HTTP API (Draw Things,
+  ComfyUI-with-shim, Forge) at `TERRARIA_IMAGE_HOST` (default
+  `http://localhost:7860`).
+- **`off`** — skip photos; keep the procedural SVG avatars.
 
 ```bash
-# Install Draw Things (free, Mac App Store), enable its HTTP API on port 7860,
-# and select a photorealistic model. Then:
-npm run faces            # generate photos for everyone missing one
+# Default (mflux): provisioned by `npm run setup`, or install it yourself —
+uv tool install mflux    # (or: pip install mflux)
+npm run faces            # generate photos for everyone missing one (first run
+                         # downloads the model weights)
 npm run faces -- --all   # regenerate all current portraits
+
+# Alternative (a1111): TERRARIA_IMAGE=a1111 with Draw Things (enable its HTTP API
+# on port 7860) or another A1111-compatible server, then `npm run faces`.
 ```
+
+Tuning env vars: `TERRARIA_IMAGE_MODEL` (default `schnell`; also `dev`,
+`z-image-turbo`, `qwen-image`), `TERRARIA_IMAGE_QUANTIZE` (default `8`),
+`TERRARIA_IMAGE_STEPS`, `TERRARIA_IMAGE_SIZE`, and `TERRARIA_IMAGE_HOST` (a1111).
 
 Aging never deletes old pics — a new photo becomes the current profile picture,
 posts an "updated their profile picture" update to the feed (friends react), and
