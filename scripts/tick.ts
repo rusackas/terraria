@@ -3,8 +3,15 @@
 import "dotenv/config";
 import { prisma } from "../src/lib/db";
 import { tick } from "../src/lib/sim";
+import { ensureOllamaReady } from "../src/lib/llm";
 
 async function main() {
+  const ready = await ensureOllamaReady();
+  if (!ready.ok) {
+    console.error(`⚠️  ${ready.note}`);
+    await prisma.$disconnect();
+    process.exit(1);
+  }
   const n = parseInt(process.argv[2] || "1", 10);
   for (let i = 0; i < n; i++) {
     const r = await tick();

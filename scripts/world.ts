@@ -11,7 +11,7 @@
 import "dotenv/config";
 import { prisma } from "../src/lib/db";
 import { tick } from "../src/lib/sim";
-import { backend } from "../src/lib/llm";
+import { backend, ensureOllamaReady } from "../src/lib/llm";
 
 const intervalSec = parseInt(
   process.argv[2] || process.env.TERRARIA_INTERVAL || "600",
@@ -35,6 +35,14 @@ function sleep(ms: number) {
 }
 
 async function main() {
+  // Make the local model ready (start Ollama, pull the model) before ticking.
+  const ready = await ensureOllamaReady();
+  if (!ready.ok) {
+    console.error(`⚠️  ${ready.note}`);
+    await prisma.$disconnect();
+    process.exit(1);
+  }
+
   // WAL lets you view the world in the browser (npm run dev) while it ticks,
   // without SQLite write-lock contention. Persists on the db file once set.
   // (PRAGMA returns a row, so use $queryRawUnsafe, not $executeRawUnsafe.)

@@ -25,10 +25,10 @@ export function backend(): Backend {
   if (mode === "ollama") return "ollama";
   if (mode === "anthropic") return "anthropic";
   if (mode === "cli" || mode === "claude-cli") return "cli";
-  // Default: `claude -p` — real Claude on your subscription, no API tokens. We
-  // never silently use the paid API just because a key is present; set
-  // TERRARIA_LLM=anthropic for that, or TERRARIA_LLM=ollama for a local model.
-  return "cli";
+  // Default: a local Ollama model — fully self-contained, no credits, no limits.
+  // `npm run setup` (and the runtime preflight) provision it automatically. Use
+  // TERRARIA_LLM=claude-cli for Claude via your subscription, or =anthropic for the API.
+  return "ollama";
 }
 
 export function llmAvailable(): boolean {
@@ -185,6 +185,61 @@ async function viaOllama(prompt: string, maxTokens: number): Promise<string | nu
     }
     return null;
   }
+}
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+async function ollamaTags(): Promise<{ models?: { name: string }[] } | null> {
+  try {
+    const r = await fetch(`${OLLAMA_HOST}/api/tags`, { signal: AbortSignal.timeout(2500) });
+    return r.ok ? ((await r.json()) as { models?: { name: string }[] }) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Make the Ollama backend usable before a run: start the server if it isn't up,
+ * and pull the model if it's missing. No-op for other backends. Returns whether
+ * the backend is ready plus a human note when it isn't.
+ */
+export async function ensureOllamaReady(): Promise<{ ok: boolean; note?: string }> {
+  if (backend() !== "ollama") return { ok: true };
+  const { execFile, spawn } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const run = promisify(execFile);
+
+  let tags = await ollamaTags();
+  if (!tags) {
+    try {
+      await run("ollama", ["--version"]);
+    } catch {
+      return { ok: false, note: "Ollama isn't installed. Run `npm run setup` (installs it and pulls a model)." };
+    }
+    // Start the server in the background and wait for it.
+    spawn("ollama", ["serve"], { detached: true, stdio: "ignore" }).unref();
+    for (let i = 0; i < 24 && !tags; i++) {
+      await sleep(500);
+      tags = await ollamaTags();
+    }
+    if (!tags) return { ok: false, note: "Started `ollama serve` but couldn't reach it." };
+  }
+
+  const names = (tags.models ?? []).map((m) => m.name);
+  const present = names.includes(OLLAMA_MODEL) || (!OLLAMA_MODEL.includes(":") && names.includes(`${OLLAMA_MODEL}:latest`));
+  if (!present) {
+    console.log(`[terraria] Pulling Ollama model "${OLLAMA_MODEL}" (first run — this downloads a few GB)…`);
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const c = spawn("ollama", ["pull", OLLAMA_MODEL], { stdio: "inherit" });
+        c.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`ollama pull exited ${code}`))));
+        c.on("error", reject);
+      });
+    } catch (e) {
+      return { ok: false, note: `Couldn't pull "${OLLAMA_MODEL}": ${(e as Error).message}` };
+    }
+  }
+  return { ok: true };
 }
 
 /** Generate text. Returns null when no backend is available, the per-tick budget

@@ -20,11 +20,16 @@ write their own posts and comments with an LLM instead of templates.
 
 ```bash
 npm install
+npm run setup          # install + start Ollama and pull a local model (one-time)
 npm run db:push        # create the SQLite schema
-npm run seed -- 80     # genesis: create 80 personas at day 0
+npm run seed -- 15     # genesis: a small starting population (invites grow it)
 npm run world          # start the clock — ticks forever (Ctrl-C to stop)
 npm run dev            # in another terminal: http://localhost:3000 to watch live
 ```
+
+Every post, comment, and reflection is written by a **local model via Ollama** by
+default — fully self-contained, no API keys, no credits. `npm run setup` provisions
+it, and `npm run world` auto-starts the server and pulls the model if needed.
 
 `npm run world` is the local "start the clock" — it ticks on an interval and keeps
 going, so the terrarium lives on its own. Use `npm run tick -- <n>` for a fixed number
